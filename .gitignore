@@ -1,3 +1,4 @@
 *.o
 SyncTime
 SyncTime.map
+src/tz_table.c
