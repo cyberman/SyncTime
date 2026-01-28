@@ -424,9 +424,11 @@ BOOL window_open(struct Screen *screen)
         LAYOUT_Label, (ULONG)"Timezone",
         LAYOUT_SpaceOuter, TRUE,
         LAYOUT_AddChild, (ULONG)create_label_row("Region:", gad_region),
+        CHILD_WeightedHeight, 0,  /* Region row: fixed height */
         LAYOUT_AddChild, (ULONG)row,
-        CHILD_MinHeight, 80,
+        CHILD_MinHeight, 80,      /* City row: minimum 80, but can grow */
         LAYOUT_AddChild, (ULONG)gad_tz_info,
+        CHILD_WeightedHeight, 0,  /* TZ info: fixed height */
         TAG_DONE);
 
     if (!timezone_group)
