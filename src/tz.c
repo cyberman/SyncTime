@@ -17,7 +17,7 @@
 #define SECS_PER_DAY   86400
 
 /* Maximum regions (12 should cover all IANA regions) */
-#define MAX_REGIONS    16
+#define MAX_REGIONS    17  /* 16 + 1 for NULL terminator */
 
 /* Maximum cities per region */
 #define MAX_CITIES     200

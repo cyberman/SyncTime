@@ -17,27 +17,16 @@
 #define GID_LOG        3
 #define GID_SERVER     4
 #define GID_INTERVAL   5
-#define GID_TIMEZONE   6
-#define GID_DST        7
-#define GID_SYNC       8
-#define GID_SAVE       9
-#define GID_HIDE       10
+#define GID_REGION     6
+#define GID_CITY       7
+#define GID_TZ_INFO    8
+#define GID_SYNC       9
+#define GID_SAVE       10
+#define GID_HIDE       11
 
 /* Log system */
 #define LOG_MAX_ENTRIES 50
 #define LOG_LINE_LEN    64
-
-/* =========================================================================
- * Timezone cycle labels (NULL-terminated for GadTools CYCLE_KIND)
- * ========================================================================= */
-
-static const char *tz_labels[] = {
-    "UTC-12", "UTC-11", "UTC-10", "UTC-9", "UTC-8", "UTC-7",
-    "UTC-6",  "UTC-5",  "UTC-4",  "UTC-3", "UTC-2", "UTC-1",
-    "UTC+0",  "UTC+1",  "UTC+2",  "UTC+3", "UTC+4", "UTC+5",
-    "UTC+6",  "UTC+7",  "UTC+8",  "UTC+9", "UTC+10","UTC+11",
-    "UTC+12", "UTC+13", "UTC+14", NULL
-};
 
 /* =========================================================================
  * Static module state
@@ -54,13 +43,23 @@ static struct Gadget *gad_next_sync = NULL;
 static struct Gadget *gad_log       = NULL;
 static struct Gadget *gad_server    = NULL;
 static struct Gadget *gad_interval  = NULL;
-static struct Gadget *gad_timezone  = NULL;
-static struct Gadget *gad_dst       = NULL;
+static struct Gadget *gad_region    = NULL;
+static struct Gadget *gad_city      = NULL;
+static struct Gadget *gad_tz_info   = NULL;
 
 /* Local edit state */
-static LONG local_tz_index  = 0;
-static BOOL local_dst       = FALSE;
 static BOOL config_changed  = FALSE;
+
+/* Region/City picker state */
+static ULONG current_region_idx = 0;
+static ULONG current_city_idx = 0;
+
+/* City list for LISTVIEW_KIND */
+static struct List city_list_header;
+static struct Node city_nodes[200];
+static ULONG city_node_count = 0;
+static const TZEntry **current_cities = NULL;
+static ULONG current_city_count = 0;
 
 /* Log entries stored as Exec List of Node structures */
 static struct List log_list;
@@ -74,6 +73,73 @@ struct LogNode {
 
 static struct LogNode log_nodes[LOG_MAX_ENTRIES];
 static LONG log_next_slot = 0;
+
+/* =========================================================================
+ * Helper functions for region/city picker
+ * ========================================================================= */
+
+/* Build the city list for a given region */
+static void build_city_list(const char *region)
+{
+    ULONG i;
+    current_cities = tz_get_cities_for_region(region, &current_city_count);
+    NewList(&city_list_header);
+    city_node_count = 0;
+    for (i = 0; i < current_city_count && i < 200; i++) {
+        city_nodes[i].ln_Name = (STRPTR)current_cities[i]->city;
+        city_nodes[i].ln_Type = 0;
+        city_nodes[i].ln_Pri = 0;
+        AddTail(&city_list_header, &city_nodes[i]);
+        city_node_count++;
+    }
+}
+
+/* Buffer for timezone info display */
+static char tz_info_buf[64];
+
+/* Format timezone info string for display */
+static void format_tz_info(const TZEntry *tz)
+{
+    LONG offset_mins_rem, offset_hrs;
+    char sign;
+    char *p;
+
+    if (tz == NULL) {
+        strcpy(tz_info_buf, "UTC");
+        return;
+    }
+
+    offset_mins_rem = tz->std_offset_mins;
+    sign = (offset_mins_rem >= 0) ? '+' : '-';
+    if (offset_mins_rem < 0) offset_mins_rem = -offset_mins_rem;
+    offset_hrs = offset_mins_rem / 60;
+    offset_mins_rem = offset_mins_rem % 60;
+
+    p = tz_info_buf;
+
+    /* Build "UTC+X" or "UTC+X:MM" */
+    *p++ = 'U'; *p++ = 'T'; *p++ = 'C'; *p++ = sign;
+
+    /* Convert hours to string */
+    if (offset_hrs >= 10) {
+        *p++ = '0' + (offset_hrs / 10);
+    }
+    *p++ = '0' + (offset_hrs % 10);
+
+    if (offset_mins_rem > 0) {
+        *p++ = ':';
+        *p++ = '0' + (offset_mins_rem / 10);
+        *p++ = '0' + (offset_mins_rem % 10);
+    }
+
+    /* Add DST info */
+    if (tz->dst_offset_mins > 0) {
+        /* Has DST */
+        strcpy(p, ", DST active seasonally");
+    } else {
+        strcpy(p, " (no DST)");
+    }
+}
 
 /* =========================================================================
  * window_open -- create and display the GadTools configuration window
@@ -117,9 +183,39 @@ BOOL window_open(struct Screen *screen)
 
     /* Read current config so gadgets reflect live values */
     cfg = config_get();
-    local_tz_index = cfg->timezone + 12;
-    local_dst      = cfg->dst;
     config_changed = FALSE;
+
+    /* Find current timezone in table and set up region/city indices */
+    {
+        const TZEntry *tz;
+        const char **regions;
+        ULONG region_count, i;
+
+        regions = tz_get_regions(&region_count);
+        tz = tz_find_by_name(cfg->tz_name);
+
+        if (tz) {
+            /* Find region index */
+            for (i = 0; i < region_count; i++) {
+                if (strcmp(regions[i], tz->region) == 0) {
+                    current_region_idx = i;
+                    break;
+                }
+            }
+            /* Build city list and find city index */
+            build_city_list(tz->region);
+            for (i = 0; i < current_city_count; i++) {
+                if (strcmp(current_cities[i]->name, cfg->tz_name) == 0) {
+                    current_city_idx = i;
+                    break;
+                }
+            }
+        } else {
+            current_region_idx = 0;
+            build_city_list(regions[0]);
+            current_city_idx = 0;
+        }
+    }
 
     /* Lock default public screen (Workbench) */
     pub = LockPubScreen(NULL);
@@ -232,24 +328,47 @@ BOOL window_open(struct Screen *screen)
         TAG_DONE);
     y += spacing;
 
-    /* ---- Timezone (CYCLE_KIND) ---- */
-    ng.ng_TopEdge    = y;
-    ng.ng_GadgetText = "Timezone:";
-    ng.ng_GadgetID   = GID_TIMEZONE;
-    gad_timezone = gad = CreateGadget(CYCLE_KIND, gad, &ng,
-        GTCY_Labels, (ULONG)tz_labels,
-        GTCY_Active, local_tz_index,
-        TAG_DONE);
-    y += spacing;
+    /* ---- Region (CYCLE_KIND) ---- */
+    {
+        const char **regions = tz_get_regions(NULL);
+        ng.ng_TopEdge    = y;
+        ng.ng_Width      = gad_width;
+        ng.ng_GadgetText = "Region:";
+        ng.ng_GadgetID   = GID_REGION;
+        ng.ng_Flags      = PLACETEXT_LEFT;
+        gad_region = gad = CreateGadget(CYCLE_KIND, gad, &ng,
+            GTCY_Labels, (ULONG)regions,
+            GTCY_Active, current_region_idx,
+            TAG_DONE);
+        y += spacing;
+    }
 
-    /* ---- DST (CHECKBOX_KIND) ---- */
+    /* ---- City (LISTVIEW_KIND) ---- */
     ng.ng_TopEdge    = y;
-    ng.ng_Width      = fonth + 4;   /* Checkbox is square */
-    ng.ng_GadgetText = "DST:";
-    ng.ng_GadgetID   = GID_DST;
-    gad_dst = gad = CreateGadget(CHECKBOX_KIND, gad, &ng,
-        GTCB_Checked, (LONG)local_dst,
-        GTCB_Scaled,  TRUE,
+    ng.ng_Height     = fonth * 5 + 4;  /* 5 lines visible */
+    ng.ng_GadgetText = "City:";
+    ng.ng_GadgetID   = GID_CITY;
+    gad_city = gad = CreateGadget(LISTVIEW_KIND, gad, &ng,
+        GTLV_Labels, (ULONG)&city_list_header,
+        GTLV_ShowSelected, (ULONG)NULL,
+        GTLV_Selected, current_city_idx,
+        GTLV_ScrollWidth, 16,
+        TAG_DONE);
+    y += ng.ng_Height + 4;
+    ng.ng_Height = fonth + 4;  /* Reset height */
+
+    /* ---- TZ Info (TEXT_KIND) ---- */
+    if (current_city_count > 0 && current_city_idx < current_city_count)
+        format_tz_info(current_cities[current_city_idx]);
+    else
+        format_tz_info(NULL);
+    ng.ng_TopEdge    = y;
+    ng.ng_GadgetText = NULL;
+    ng.ng_GadgetID   = GID_TZ_INFO;
+    ng.ng_Flags      = 0;
+    gad_tz_info = gad = CreateGadget(TEXT_KIND, gad, &ng,
+        GTTX_Text, (ULONG)tz_info_buf,
+        GTTX_Border, TRUE,
         TAG_DONE);
     y += spacing;
 
@@ -294,7 +413,8 @@ BOOL window_open(struct Screen *screen)
         FreeVisualInfo(vi);
         vi = NULL;
         gad_status = gad_last_sync = gad_next_sync = gad_log = NULL;
-        gad_server = gad_interval = gad_timezone = gad_dst = NULL;
+        gad_server = gad_interval = NULL;
+        gad_region = gad_city = gad_tz_info = NULL;
         UnlockPubScreen(NULL, pub);
         return FALSE;
     }
@@ -310,7 +430,7 @@ BOOL window_open(struct Screen *screen)
         WA_Gadgets,     (ULONG)glist,
         WA_IDCMP,       IDCMP_CLOSEWINDOW | IDCMP_REFRESHWINDOW |
                         BUTTONIDCMP | STRINGIDCMP | CYCLEIDCMP |
-                        CHECKBOXIDCMP,
+                        LISTVIEWIDCMP,
         WA_DragBar,     TRUE,
         WA_DepthGadget, TRUE,
         WA_CloseGadget, TRUE,
@@ -324,7 +444,8 @@ BOOL window_open(struct Screen *screen)
         FreeVisualInfo(vi);
         vi = NULL;
         gad_status = gad_last_sync = gad_next_sync = gad_log = NULL;
-        gad_server = gad_interval = gad_timezone = gad_dst = NULL;
+        gad_server = gad_interval = NULL;
+        gad_region = gad_city = gad_tz_info = NULL;
         UnlockPubScreen(NULL, pub);
         return FALSE;
     }
@@ -360,8 +481,9 @@ void window_close(void)
     gad_log       = NULL;
     gad_server    = NULL;
     gad_interval  = NULL;
-    gad_timezone  = NULL;
-    gad_dst       = NULL;
+    gad_region    = NULL;
+    gad_city      = NULL;
+    gad_tz_info   = NULL;
 }
 
 /* =========================================================================
@@ -425,8 +547,10 @@ BOOL window_handle_events(SyncConfig *cfg, SyncStatus *st)
 
                         config_set_server(srv);
                         config_set_interval(intv);
-                        config_set_timezone(local_tz_index - 12);
-                        config_set_dst(local_dst);
+                        /* Set timezone from current city selection */
+                        if (current_city_count > 0 && current_city_idx < current_city_count) {
+                            config_set_tz_name(current_cities[current_city_idx]->name);
+                        }
                         config_save();
                         config_changed = TRUE;
 
@@ -442,12 +566,34 @@ BOOL window_handle_events(SyncConfig *cfg, SyncStatus *st)
                         window_close();
                         return sync_requested;
 
-                    case GID_TIMEZONE:
-                        local_tz_index = code;
+                    case GID_REGION: {
+                        const char **regions = tz_get_regions(NULL);
+                        current_region_idx = code;
+                        /* Detach list before modification */
+                        GT_SetGadgetAttrs(gad_city, win, NULL,
+                            GTLV_Labels, (ULONG)~0,
+                            TAG_DONE);
+                        build_city_list(regions[current_region_idx]);
+                        current_city_idx = 0;
+                        GT_SetGadgetAttrs(gad_city, win, NULL,
+                            GTLV_Labels, (ULONG)&city_list_header,
+                            GTLV_Selected, 0,
+                            TAG_DONE);
+                        if (current_city_count > 0) {
+                            format_tz_info(current_cities[0]);
+                            GT_SetGadgetAttrs(gad_tz_info, win, NULL,
+                                GTTX_Text, (ULONG)tz_info_buf, TAG_DONE);
+                        }
                         break;
+                    }
 
-                    case GID_DST:
-                        local_dst = !local_dst;
+                    case GID_CITY:
+                        if (code < current_city_count) {
+                            current_city_idx = code;
+                            format_tz_info(current_cities[code]);
+                            GT_SetGadgetAttrs(gad_tz_info, win, NULL,
+                                GTTX_Text, (ULONG)tz_info_buf, TAG_DONE);
+                        }
                         break;
                 }
                 break;
