@@ -73,27 +73,23 @@ BOOL sntp_parse_response(const UBYTE *packet, ULONG *ntp_secs, ULONG *ntp_frac)
 }
 
 /*
- * sntp_ntp_to_amiga - Convert NTP timestamp to AmigaOS timestamp
+ * sntp_ntp_to_amiga - Convert NTP timestamp to Amiga local time
  *
  * Subtracts the NTP-to-Amiga epoch offset (2,461,449,600 seconds
- * from Jan 1 1900 to Jan 1 1978), then applies timezone and DST
- * adjustments.
- *
- * tz_offset is in hours (signed), dst adds one hour if TRUE.
+ * from Jan 1 1900 to Jan 1 1978), then applies timezone offset
+ * including DST if currently active.
  */
-ULONG sntp_ntp_to_amiga(ULONG ntp_secs, LONG tz_offset, BOOL dst)
+ULONG sntp_ntp_to_amiga(ULONG ntp_secs, const TZEntry *tz)
 {
-    ULONG amiga_secs;
+    ULONG utc_secs;
+    LONG offset_mins;
 
     /* Convert from NTP epoch (1900) to Amiga epoch (1978) */
-    amiga_secs = ntp_secs - NTP_TO_AMIGA_EPOCH;
+    utc_secs = ntp_secs - NTP_TO_AMIGA_EPOCH;
 
-    /* Apply timezone offset (hours to seconds, signed) */
-    amiga_secs = (ULONG)((LONG)amiga_secs + (tz_offset * 3600));
+    /* Get timezone offset including DST if active */
+    offset_mins = tz_get_offset_mins(tz, utc_secs);
 
-    /* Apply DST adjustment if enabled */
-    if (dst)
-        amiga_secs += 3600;
-
-    return amiga_secs;
+    /* Apply offset (can be negative for western timezones) */
+    return (ULONG)((LONG)utc_secs + (offset_mins * 60));
 }
