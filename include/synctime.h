@@ -43,14 +43,11 @@
 /* Configuration defaults */
 #define DEFAULT_SERVER     "pool.ntp.org"
 #define DEFAULT_INTERVAL   3600
-#define DEFAULT_TIMEZONE   -8
-#define DEFAULT_DST        TRUE
+#define DEFAULT_TIMEZONE   "America/Los_Angeles"
 #define SERVER_NAME_MAX    128
 #define MIN_INTERVAL       60
 #define MAX_INTERVAL       86400
 #define RETRY_INTERVAL     30      /* Seconds between retries on failure */
-#define MIN_TIMEZONE       -12
-#define MAX_TIMEZONE       14
 
 /* Prefs file paths */
 #define PREFS_ENV_PATH     "ENV:SyncTime.prefs"
@@ -76,8 +73,7 @@
 typedef struct {
     char  server[SERVER_NAME_MAX];
     LONG  interval;     /* seconds between syncs */
-    LONG  timezone;     /* hours offset from UTC (-12 to +14) */
-    BOOL  dst;          /* daylight saving time enabled */
+    char  tz_name[48];  /* IANA timezone name, e.g. "America/Los_Angeles" */
 } SyncConfig;
 
 typedef struct {
@@ -88,6 +84,23 @@ typedef struct {
     char  last_sync_text[32];  /* Formatted last sync time */
     char  next_sync_text[32];  /* Formatted next sync time */
 } SyncStatus;
+
+/* Timezone entry from generated tz_table.c */
+typedef struct {
+    const char *name;       /* Full name: "America/Los_Angeles" */
+    const char *region;     /* Region: "America" */
+    const char *city;       /* City: "Los_Angeles" */
+    WORD std_offset_mins;   /* Standard offset from UTC in minutes */
+    WORD dst_offset_mins;   /* Additional DST offset (0 if no DST) */
+    UBYTE dst_start_month;  /* 1-12, 0 = no DST */
+    UBYTE dst_start_week;   /* 1-5, which occurrence of dow */
+    UBYTE dst_start_dow;    /* 0=Sun, 1=Mon, ..., 6=Sat */
+    UBYTE dst_start_hour;   /* Local hour of transition */
+    UBYTE dst_end_month;
+    UBYTE dst_end_week;
+    UBYTE dst_end_dow;
+    UBYTE dst_end_hour;
+} TZEntry;
 
 /* =========================================================================
  * config.c
@@ -100,8 +113,7 @@ BOOL        config_save(void);
 SyncConfig *config_get(void);
 void        config_set_server(const char *server);
 void        config_set_interval(LONG interval);
-void        config_set_timezone(LONG tz);
-void        config_set_dst(BOOL enabled);
+void        config_set_tz_name(const char *name);
 
 /* =========================================================================
  * network.c
@@ -121,7 +133,20 @@ LONG network_recv_udp(UBYTE *buf, ULONG buf_size, ULONG timeout_secs);
 void sntp_build_request(UBYTE *packet);
 BOOL sntp_parse_response(const UBYTE *packet, ULONG *ntp_secs,
                          ULONG *ntp_frac);
-ULONG sntp_ntp_to_amiga(ULONG ntp_secs, LONG tz_offset, BOOL dst);
+ULONG sntp_ntp_to_amiga(ULONG ntp_secs, const TZEntry *tz);
+
+/* =========================================================================
+ * tz.c - Timezone database functions
+ * ========================================================================= */
+
+extern const TZEntry tz_table[];
+extern const ULONG tz_table_count;
+
+const TZEntry *tz_find_by_name(const char *name);
+const char   **tz_get_regions(ULONG *count);
+const TZEntry **tz_get_cities_for_region(const char *region, ULONG *count);
+BOOL           tz_is_dst_active(const TZEntry *tz, ULONG utc_secs);
+LONG           tz_get_offset_mins(const TZEntry *tz, ULONG utc_secs);
 
 /* =========================================================================
  * clock.c
