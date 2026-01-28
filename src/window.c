@@ -513,14 +513,13 @@ BOOL window_open(struct Screen *screen)
     if (!layout_root)
         goto cleanup;
 
-    /* Create window object */
+    /* Create window object (no size gadget - we control size via log toggle) */
     window_obj = NewObject(WINDOW_GetClass(), NULL,
         WA_Title, (ULONG)"SyncTime",
         WA_DragBar, TRUE,
         WA_CloseGadget, TRUE,
         WA_DepthGadget, TRUE,
         WA_Activate, TRUE,
-        WA_SizeGadget, TRUE,
         WINDOW_Position, WPOS_CENTERSCREEN,
         WINDOW_ParentGroup, (ULONG)layout_root,
         TAG_DONE);
