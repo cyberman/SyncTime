@@ -166,6 +166,7 @@ const char   **tz_get_regions(ULONG *count);
 const TZEntry **tz_get_cities_for_region(const char *region, ULONG *count);
 BOOL           tz_is_dst_active(const TZEntry *tz, ULONG utc_secs);
 LONG           tz_get_offset_mins(const TZEntry *tz, ULONG utc_secs);
+BOOL           tz_set_env(const TZEntry *tz);
 
 /* =========================================================================
  * clock.c

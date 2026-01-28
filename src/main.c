@@ -223,7 +223,7 @@ static BOOL setup_commodity(int argc, char **argv)
     nb.nb_Title   = CX_TITLE;
     nb.nb_Descr   = CX_DESCR;
     nb.nb_Unique  = NBU_UNIQUE | NBU_NOTIFY;
-    nb.nb_Flags   = 0;
+    nb.nb_Flags   = COF_SHOW_HIDE;  /* Enable Show/Hide Interface in Exchange */
     nb.nb_Pri     = priority;
     nb.nb_Port    = broker_port;
     nb.nb_ReservedChannel = 0;
@@ -562,6 +562,14 @@ int main(int argc, char **argv)
 
     if (!config_init())
         goto cleanup;
+
+    /* Set TZ/TZONE environment variables from configured timezone */
+    {
+        SyncConfig *cfg = config_get();
+        const TZEntry *tz = tz_find_by_name(cfg->tz_name);
+        if (tz)
+            tz_set_env(tz);
+    }
 
     if (!network_init())
         goto cleanup;

@@ -5,8 +5,7 @@
  * and editable configuration fields.
  * Opened via Exchange "Show" or the commodity hotkey.
  *
- * Note: We use explicit NewObject calls with tag arrays instead of
- * the convenience macros, for cross-compiler compatibility.
+ * Log is displayed in a separate window.
  */
 
 #include "synctime.h"
@@ -53,15 +52,17 @@
 #define GID_LOG_TOGGLE  12
 #define GID_LOG         13
 
-/* Log system */
-#define LOG_MAX_ENTRIES 50
-#define LOG_LINE_LEN    64
+/* Log system - circular buffer with 2KB limit
+ * With max 80 chars per line, 2048/80 = ~25 entries max */
+#define LOG_MAX_BYTES   2048
+#define LOG_LINE_LEN    80
+#define LOG_MAX_ENTRIES (LOG_MAX_BYTES / LOG_LINE_LEN)
 
 /* Maximum regions for chooser */
 #define MAX_REGIONS     20
 
 /* =========================================================================
- * Static module state
+ * Static module state - Main window
  * ========================================================================= */
 
 static Object *window_obj = NULL;
@@ -76,27 +77,24 @@ static Object *gad_interval  = NULL;
 static Object *gad_region    = NULL;
 static Object *gad_city      = NULL;
 static Object *gad_tz_info   = NULL;
-static Object *gad_log       = NULL;
 static Object *gad_log_toggle = NULL;
 
 /* Layout objects */
 static Object *layout_root   = NULL;
-static Object *layout_log    = NULL;
-
-/* Log visibility state */
-static BOOL log_visible = FALSE;
-
-/* Log panel height for window resizing */
-#define LOG_PANEL_HEIGHT 120
-
-/* Window height without log (stored when window opens) */
-static UWORD base_window_height = 0;
 
 /* Timezone selection state */
 static ULONG current_region_idx = 0;
 static ULONG current_city_idx = 0;
 static const TZEntry **current_cities = NULL;
 static ULONG current_city_count = 0;
+
+/* =========================================================================
+ * Static module state - Log window
+ * ========================================================================= */
+
+static Object *log_window_obj = NULL;
+static struct Window *log_win = NULL;
+static Object *gad_log = NULL;
 
 /* Chooser list for regions */
 static struct List region_chooser_list;
@@ -106,10 +104,11 @@ static BOOL region_list_initialized = FALSE;
 static struct List city_browser_list;
 static BOOL city_list_initialized = FALSE;
 
-/* ListBrowser list for log */
+/* ListBrowser list for log - circular buffer */
 static struct List log_browser_list;
 static BOOL log_list_initialized = FALSE;
 static LONG log_count = 0;
+static LONG log_bytes_used = 0;  /* Track total bytes for 2KB limit */
 
 /* Buffer for text displays */
 static char status_buf[64] = "Idle";
@@ -194,6 +193,7 @@ static void init_log_list(void)
         NewList(&log_browser_list);
         log_list_initialized = TRUE;
         log_count = 0;
+        log_bytes_used = 0;
     }
 }
 
@@ -272,10 +272,166 @@ static Object *create_label_row(const char *label_text, Object *gadget)
 
     return NewObject(LAYOUT_GetClass(), NULL,
         LAYOUT_Orientation, LAYOUT_ORIENT_HORIZ,
-        LAYOUT_AddChild, (ULONG)label,
+        LAYOUT_AddImage, (ULONG)label,  /* Labels are images, not gadgets */
         CHILD_WeightedWidth, 0,
         LAYOUT_AddChild, (ULONG)gadget,
         TAG_DONE);
+}
+
+/* =========================================================================
+ * Log window functions
+ * ========================================================================= */
+
+static void log_window_open(void)
+{
+    Object *log_layout;
+    WORD log_left, log_top, log_width, log_height;
+
+    if (log_window_obj)
+        return;  /* Already open */
+
+    init_log_list();
+
+    /* Calculate log window position and size based on main window */
+    if (win) {
+        log_left = win->LeftEdge;
+        log_top = win->TopEdge + win->Height;  /* Position below main window */
+        log_width = win->Width;
+        log_height = 120;  /* Fixed height for log display */
+    } else {
+        /* Fallback if main window not open */
+        log_left = 100;
+        log_top = 200;
+        log_width = 320;
+        log_height = 120;
+    }
+
+    /* Create log listbrowser */
+    gad_log = NewObject(LISTBROWSER_GetClass(), NULL,
+        GA_ID, GID_LOG,
+        GA_ReadOnly, TRUE,
+        LISTBROWSER_Labels, (ULONG)&log_browser_list,
+        LISTBROWSER_AutoFit, TRUE,
+        TAG_DONE);
+
+    if (!gad_log)
+        return;
+
+    /* Create log layout */
+    log_layout = NewObject(LAYOUT_GetClass(), NULL,
+        LAYOUT_Orientation, LAYOUT_ORIENT_VERT,
+        LAYOUT_SpaceOuter, TRUE,
+        LAYOUT_AddChild, (ULONG)gad_log,
+        TAG_DONE);
+
+    if (!log_layout) {
+        DisposeObject(gad_log);
+        gad_log = NULL;
+        return;
+    }
+
+    /* Create log window - positioned beneath main config window */
+    log_window_obj = NewObject(WINDOW_GetClass(), NULL,
+        WA_Title, (ULONG)"SyncTime Log",
+        WA_Left, log_left,
+        WA_Top, log_top,
+        WA_Width, log_width,
+        WA_Height, log_height,
+        WA_DragBar, TRUE,
+        WA_CloseGadget, TRUE,
+        WA_DepthGadget, TRUE,
+        WA_SizeGadget, TRUE,
+        WA_Activate, FALSE,
+        WINDOW_ParentGroup, (ULONG)log_layout,
+        TAG_DONE);
+
+    if (!log_window_obj) {
+        DisposeObject(log_layout);
+        gad_log = NULL;
+        return;
+    }
+
+    /* Open the window */
+    log_win = (struct Window *)DoMethod(log_window_obj, WM_OPEN, NULL);
+    if (!log_win) {
+        DisposeObject(log_window_obj);
+        log_window_obj = NULL;
+        gad_log = NULL;
+        return;
+    }
+
+    /* Scroll to bottom */
+    if (log_count > 0) {
+        SetGadgetAttrs((struct Gadget *)gad_log, log_win, NULL,
+            LISTBROWSER_MakeVisible, log_count - 1,
+            TAG_DONE);
+    }
+
+    /* Update main window button text */
+    if (win && gad_log_toggle) {
+        SetGadgetAttrs((struct Gadget *)gad_log_toggle, win, NULL,
+            GA_Text, (ULONG)"Hide Log",
+            TAG_DONE);
+    }
+}
+
+static void log_window_close(void)
+{
+    if (log_win) {
+        /* Detach list before closing */
+        if (gad_log) {
+            SetGadgetAttrs((struct Gadget *)gad_log, log_win, NULL,
+                LISTBROWSER_Labels, (ULONG)~0,
+                TAG_DONE);
+        }
+        DoMethod(log_window_obj, WM_CLOSE, NULL);
+        log_win = NULL;
+    }
+    if (log_window_obj) {
+        DisposeObject(log_window_obj);
+        log_window_obj = NULL;
+    }
+    gad_log = NULL;
+
+    /* Update main window button text */
+    if (win && gad_log_toggle) {
+        SetGadgetAttrs((struct Gadget *)gad_log_toggle, win, NULL,
+            GA_Text, (ULONG)"Show Log",
+            TAG_DONE);
+    }
+}
+
+static BOOL log_window_is_open(void)
+{
+    return (log_win != NULL);
+}
+
+static void toggle_log_window(void)
+{
+    if (log_window_is_open()) {
+        log_window_close();
+    } else {
+        log_window_open();
+    }
+}
+
+/* Handle log window events - returns TRUE if window was closed */
+static BOOL log_window_handle_events(void)
+{
+    ULONG result;
+    UWORD code;
+
+    if (!log_window_obj || !log_win)
+        return FALSE;
+
+    while ((result = DoMethod(log_window_obj, WM_HANDLEINPUT, &code)) != WMHI_LASTMSG) {
+        if ((result & WMHI_CLASSMASK) == WMHI_CLOSEWINDOW) {
+            log_window_close();
+            return TRUE;
+        }
+    }
+
+    return FALSE;
 }
 
 /* =========================================================================
@@ -412,10 +568,10 @@ BOOL window_open(struct Screen *screen)
     if (!gad_region || !gad_city || !gad_tz_info)
         goto cleanup;
 
-    /* Create city row with minimum height */
+    /* Create city row */
     row = NewObject(LAYOUT_GetClass(), NULL,
         LAYOUT_Orientation, LAYOUT_ORIENT_HORIZ,
-        LAYOUT_AddChild, (ULONG)create_label("City:"),
+        LAYOUT_AddImage, (ULONG)create_label("City:"),
         CHILD_WeightedWidth, 0,
         LAYOUT_AddChild, (ULONG)gad_city,
         TAG_DONE);
@@ -427,17 +583,17 @@ BOOL window_open(struct Screen *screen)
         LAYOUT_Label, (ULONG)"Timezone",
         LAYOUT_SpaceOuter, TRUE,
         LAYOUT_AddChild, (ULONG)create_label_row("Region:", gad_region),
-        CHILD_WeightedHeight, 0,  /* Region row: fixed height */
+        CHILD_WeightedHeight, 0,
         LAYOUT_AddChild, (ULONG)row,
-        CHILD_MinHeight, 80,      /* City row: minimum 80, but can grow */
+        CHILD_MinHeight, 80,
         LAYOUT_AddChild, (ULONG)gad_tz_info,
-        CHILD_WeightedHeight, 0,  /* TZ info: fixed height */
+        CHILD_WeightedHeight, 0,
         TAG_DONE);
 
     if (!timezone_group)
         goto cleanup;
 
-    /* Create buttons */
+    /* Create log toggle button */
     gad_log_toggle = NewObject(BUTTON_GetClass(), NULL,
         GA_ID, GID_LOG_TOGGLE,
         GA_RelVerify, TRUE,
@@ -470,31 +626,7 @@ BOOL window_open(struct Screen *screen)
     if (!button_row)
         goto cleanup;
 
-    /* Create log listbrowser (always present, hidden by window size) */
-    gad_log = NewObject(LISTBROWSER_GetClass(), NULL,
-        GA_ID, GID_LOG,
-        GA_ReadOnly, TRUE,
-        LISTBROWSER_Labels, (ULONG)&log_browser_list,
-        LISTBROWSER_AutoFit, TRUE,
-        LISTBROWSER_VertSeparators, FALSE,
-        TAG_DONE);
-
-    if (!gad_log)
-        goto cleanup;
-
-    /* Create log panel layout */
-    layout_log = NewObject(LAYOUT_GetClass(), NULL,
-        LAYOUT_Orientation, LAYOUT_ORIENT_VERT,
-        LAYOUT_BevelStyle, BVS_GROUP,
-        LAYOUT_Label, (ULONG)"Log",
-        LAYOUT_SpaceOuter, TRUE,
-        LAYOUT_AddChild, (ULONG)gad_log,
-        TAG_DONE);
-
-    if (!layout_log)
-        goto cleanup;
-
-    /* Create root layout (includes log panel - hidden by window size initially) */
+    /* Create root layout */
     layout_root = NewObject(LAYOUT_GetClass(), NULL,
         LAYOUT_Orientation, LAYOUT_ORIENT_VERT,
         LAYOUT_SpaceOuter, TRUE,
@@ -506,14 +638,12 @@ BOOL window_open(struct Screen *screen)
         LAYOUT_AddChild, (ULONG)timezone_group,
         LAYOUT_AddChild, (ULONG)button_row,
         CHILD_WeightedHeight, 0,
-        LAYOUT_AddChild, (ULONG)layout_log,
-        CHILD_MinHeight, LOG_PANEL_HEIGHT,
         TAG_DONE);
 
     if (!layout_root)
         goto cleanup;
 
-    /* Create window object (no size gadget - we control size via log toggle) */
+    /* Create window object */
     window_obj = NewObject(WINDOW_GetClass(), NULL,
         WA_Title, (ULONG)"SyncTime",
         WA_DragBar, TRUE,
@@ -535,37 +665,26 @@ BOOL window_open(struct Screen *screen)
         return FALSE;
     }
 
-    /* Store base height and shrink to hide log panel initially */
-    base_window_height = win->Height - LOG_PANEL_HEIGHT;
-    ChangeWindowBox(win, win->LeftEdge, win->TopEdge,
-        win->Width, base_window_height);
-
-    log_visible = FALSE;
+    /* Scroll city list to show selected item near top (with 1 item of context) */
+    if (gad_city && current_city_idx > 0) {
+        LONG top_idx = (LONG)current_city_idx - 1;
+        if (top_idx < 0) top_idx = 0;
+        SetGadgetAttrs((struct Gadget *)gad_city, win, NULL,
+            LISTBROWSER_Top, top_idx,
+            TAG_DONE);
+    }
 
     return TRUE;
 
 cleanup:
-    /* Clean up any partially created objects.
-     * Note: Once an object is added to a layout, the layout owns it.
-     * Disposing the parent disposes all children.
-     * Only dispose objects that weren't added to a parent yet.
-     */
     if (layout_root) {
-        /* layout_root owns everything added to it */
         DisposeObject(layout_root);
-    } else if (layout_log) {
-        /* layout_log owns gad_log */
-        DisposeObject(layout_log);
-    } else if (gad_log) {
-        DisposeObject(gad_log);
     }
-    /* Note: status_group, settings_group, timezone_group, button_row
-     * would be owned by layout_root if it was created */
-    layout_root = layout_log = NULL;
+    layout_root = NULL;
     gad_status = gad_last_sync = gad_next_sync = NULL;
     gad_server = gad_interval = NULL;
     gad_region = gad_city = gad_tz_info = NULL;
-    gad_log = gad_log_toggle = NULL;
+    gad_log_toggle = NULL;
     return FALSE;
 }
 
@@ -575,6 +694,9 @@ cleanup:
 
 void window_close(void)
 {
+    /* Close log window first */
+    log_window_close();
+
     /* Detach lists from gadgets BEFORE disposing (prevents crash) */
     if (win) {
         if (gad_region) {
@@ -584,11 +706,6 @@ void window_close(void)
         }
         if (gad_city) {
             SetGadgetAttrs((struct Gadget *)gad_city, win, NULL,
-                LISTBROWSER_Labels, (ULONG)~0,
-                TAG_DONE);
-        }
-        if (gad_log) {
-            SetGadgetAttrs((struct Gadget *)gad_log, win, NULL,
                 LISTBROWSER_Labels, (ULONG)~0,
                 TAG_DONE);
         }
@@ -615,13 +732,11 @@ void window_close(void)
     /* Note: log list is preserved across window open/close */
 
     /* Reset object pointers */
-    layout_root = layout_log = NULL;
+    layout_root = NULL;
     gad_status = gad_last_sync = gad_next_sync = NULL;
     gad_server = gad_interval = NULL;
     gad_region = gad_city = gad_tz_info = NULL;
-    gad_log = gad_log_toggle = NULL;
-    log_visible = FALSE;
-    base_window_height = 0;
+    gad_log_toggle = NULL;
 }
 
 /* =========================================================================
@@ -639,50 +754,14 @@ BOOL window_is_open(void)
 
 ULONG window_signal(void)
 {
+    ULONG sig = 0;
+
     if (win)
-        return 1UL << win->UserPort->mp_SigBit;
-    return 0;
-}
+        sig |= 1UL << win->UserPort->mp_SigBit;
+    if (log_win)
+        sig |= 1UL << log_win->UserPort->mp_SigBit;
 
-/* =========================================================================
- * Helper: toggle_log_panel -- show or hide the log panel
- * ========================================================================= */
-
-static void toggle_log_panel(void)
-{
-    if (!win || !base_window_height)
-        return;
-
-    if (!log_visible) {
-        /* Show log: expand window to reveal log panel */
-        ChangeWindowBox(win, win->LeftEdge, win->TopEdge,
-            win->Width, base_window_height + LOG_PANEL_HEIGHT);
-
-        /* Update button text */
-        SetGadgetAttrs((struct Gadget *)gad_log_toggle, win, NULL,
-            GA_Text, (ULONG)"Hide Log",
-            TAG_DONE);
-
-        /* Scroll log to bottom if there are entries */
-        if (gad_log && log_count > 0) {
-            SetGadgetAttrs((struct Gadget *)gad_log, win, NULL,
-                LISTBROWSER_MakeVisible, log_count - 1,
-                TAG_DONE);
-        }
-
-        log_visible = TRUE;
-    } else {
-        /* Hide log: shrink window to clip log panel */
-        ChangeWindowBox(win, win->LeftEdge, win->TopEdge,
-            win->Width, base_window_height);
-
-        /* Update button text */
-        SetGadgetAttrs((struct Gadget *)gad_log_toggle, win, NULL,
-            GA_Text, (ULONG)"Show Log",
-            TAG_DONE);
-
-        log_visible = FALSE;
-    }
+    return sig;
 }
 
 /* =========================================================================
@@ -762,6 +841,8 @@ static void save_config_from_gadgets(void)
     /* Set timezone from current city selection */
     if (current_city_count > 0 && current_city_idx < current_city_count) {
         config_set_tz_name(current_cities[current_city_idx]->name);
+        /* Update TZ/TZONE environment variables */
+        tz_set_env(current_cities[current_city_idx]);
     }
 
     config_save();
@@ -784,6 +865,11 @@ BOOL window_handle_events(SyncConfig *cfg, SyncStatus *st)
 
     (void)cfg;  /* Config is accessed via config_get() */
     (void)st;   /* Status is updated via window_update_status */
+
+    /* Handle log window events first */
+    if (log_win) {
+        log_window_handle_events();
+    }
 
     if (!window_obj || !win)
         return FALSE;
@@ -809,7 +895,7 @@ BOOL window_handle_events(SyncConfig *cfg, SyncStatus *st)
                         return sync_requested;
 
                     case GID_LOG_TOGGLE:
-                        toggle_log_panel();
+                        toggle_log_window();
                         break;
 
                     case GID_REGION:
@@ -857,7 +943,7 @@ void window_update_status(SyncStatus *st)
 }
 
 /* =========================================================================
- * window_log -- add an entry to the scrollable log
+ * window_log -- add an entry to the scrollable log (2KB circular buffer)
  * ========================================================================= */
 
 void window_log(const char *message)
@@ -869,7 +955,7 @@ void window_log(const char *message)
     /* Initialize log list if needed (may be called before window_open) */
     init_log_list();
 
-    /* Calculate message length */
+    /* Calculate message length (capped at LOG_LINE_LEN - 1) */
     for (len = 0; message[len] != '\0' && len < LOG_LINE_LEN - 1; len++)
         ;
 
@@ -894,10 +980,16 @@ void window_log(const char *message)
     if (!node)
         return;
 
-    /* If we're at max entries, remove oldest */
-    if (log_count >= LOG_MAX_ENTRIES) {
+    /* Circular buffer: remove oldest entries to stay within 2KB limit
+     * We track actual bytes used for accuracy, falling back to count limit */
+    while ((log_bytes_used + len + 1 > LOG_MAX_BYTES || log_count >= LOG_MAX_ENTRIES)
+           && log_count > 0) {
         struct Node *old = RemHead(&log_browser_list);
         if (old) {
+            /* Use average line length estimate when removing old entries
+             * (can't easily retrieve old text length from node) */
+            log_bytes_used -= (LOG_LINE_LEN / 2);
+            if (log_bytes_used < 0) log_bytes_used = 0;
             FreeListBrowserNode(old);
             log_count--;
         }
@@ -906,10 +998,11 @@ void window_log(const char *message)
     /* Add to end of list */
     AddTail(&log_browser_list, node);
     log_count++;
+    log_bytes_used += len + 1;  /* +1 for null terminator */
 
-    /* Update listbrowser if visible */
-    if (win && gad_log && log_visible) {
-        SetGadgetAttrs((struct Gadget *)gad_log, win, NULL,
+    /* Update log window listbrowser if open */
+    if (log_win && gad_log) {
+        SetGadgetAttrs((struct Gadget *)gad_log, log_win, NULL,
             LISTBROWSER_Labels, (ULONG)&log_browser_list,
             LISTBROWSER_MakeVisible, log_count - 1,  /* Auto-scroll to bottom */
             TAG_DONE);

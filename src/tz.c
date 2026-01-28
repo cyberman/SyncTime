@@ -444,3 +444,141 @@ LONG tz_get_offset_mins(const TZEntry *tz, ULONG utc_secs)
 
     return (LONG)tz->std_offset_mins;
 }
+
+/* =========================================================================
+ * Helper: append a number to a string buffer
+ * ========================================================================= */
+
+static char *append_num(char *p, LONG num)
+{
+    LONG abs_num;
+    char tmp[12];
+    LONG i = 0;
+
+    if (num < 0) {
+        *p++ = '-';
+        abs_num = -num;
+    } else {
+        abs_num = num;
+    }
+
+    /* Convert to string (reversed) */
+    do {
+        tmp[i++] = '0' + (abs_num % 10);
+        abs_num /= 10;
+    } while (abs_num > 0);
+
+    /* Reverse into output */
+    while (i > 0)
+        *p++ = tmp[--i];
+
+    return p;
+}
+
+/* =========================================================================
+ * tz_set_env - Set TZ and TZONE environment variables
+ *
+ * Sets the Amiga environment variables based on the timezone entry.
+ * TZ uses POSIX format: STDoffset[DST[offset],M<month>.<week>.<dow>,...]
+ * TZONE is set to the IANA timezone name.
+ *
+ * Returns TRUE on success, FALSE on failure.
+ * ========================================================================= */
+
+BOOL tz_set_env(const TZEntry *tz)
+{
+    char tz_buf[80];
+    char *p;
+    LONG offset_hours, offset_mins_rem;
+    LONG dst_offset_hours, dst_offset_mins_rem;
+
+    if (!tz)
+        return FALSE;
+
+    p = tz_buf;
+
+    /* Build standard time zone abbreviation from city name (first 3-4 chars)
+     * For simplicity, we just use a generic abbreviation based on offset */
+    if (tz->std_offset_mins == 0) {
+        *p++ = 'U'; *p++ = 'T'; *p++ = 'C';
+    } else if (tz->std_offset_mins < 0) {
+        /* East of UTC (positive offset in POSIX = west, so we negate) */
+        *p++ = 'U'; *p++ = 'T'; *p++ = 'C';
+    } else {
+        /* West of UTC */
+        *p++ = 'U'; *p++ = 'T'; *p++ = 'C';
+    }
+
+    /* Add offset (POSIX: positive = west of UTC, negative = east)
+     * Our std_offset_mins is positive for east, so we negate */
+    offset_hours = -(tz->std_offset_mins / 60);
+    offset_mins_rem = tz->std_offset_mins % 60;
+    if (offset_mins_rem < 0) offset_mins_rem = -offset_mins_rem;
+
+    p = append_num(p, offset_hours);
+    if (offset_mins_rem > 0) {
+        *p++ = ':';
+        if (offset_mins_rem < 10) *p++ = '0';
+        p = append_num(p, offset_mins_rem);
+    }
+
+    /* Add DST info if applicable */
+    if (tz->dst_offset_mins > 0 && tz->dst_start_month > 0) {
+        /* DST abbreviation */
+        *p++ = 'D'; *p++ = 'S'; *p++ = 'T';
+
+        /* DST offset (total offset during DST) */
+        dst_offset_hours = -((tz->std_offset_mins + tz->dst_offset_mins) / 60);
+        dst_offset_mins_rem = (tz->std_offset_mins + tz->dst_offset_mins) % 60;
+        if (dst_offset_mins_rem < 0) dst_offset_mins_rem = -dst_offset_mins_rem;
+
+        p = append_num(p, dst_offset_hours);
+        if (dst_offset_mins_rem > 0) {
+            *p++ = ':';
+            if (dst_offset_mins_rem < 10) *p++ = '0';
+            p = append_num(p, dst_offset_mins_rem);
+        }
+
+        /* DST start rule: M<month>.<week>.<dow> */
+        *p++ = ',';
+        *p++ = 'M';
+        p = append_num(p, tz->dst_start_month);
+        *p++ = '.';
+        p = append_num(p, tz->dst_start_week);
+        *p++ = '.';
+        p = append_num(p, tz->dst_start_dow);
+
+        /* DST start time if not 2:00 AM */
+        if (tz->dst_start_hour != 2) {
+            *p++ = '/';
+            p = append_num(p, tz->dst_start_hour);
+        }
+
+        /* DST end rule */
+        *p++ = ',';
+        *p++ = 'M';
+        p = append_num(p, tz->dst_end_month);
+        *p++ = '.';
+        p = append_num(p, tz->dst_end_week);
+        *p++ = '.';
+        p = append_num(p, tz->dst_end_dow);
+
+        /* DST end time if not 2:00 AM */
+        if (tz->dst_end_hour != 2) {
+            *p++ = '/';
+            p = append_num(p, tz->dst_end_hour);
+        }
+    }
+
+    *p = '\0';
+
+    /* Set TZ environment variable (global, persistent) */
+    if (!SetVar("TZ", tz_buf, -1, GVF_GLOBAL_ONLY))
+        return FALSE;
+
+    /* Set TZONE to the full IANA name */
+    if (!SetVar("TZONE", (STRPTR)tz->name, -1, GVF_GLOBAL_ONLY))
+        return FALSE;
+
+    return TRUE;
+}
