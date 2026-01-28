@@ -237,17 +237,38 @@ static void perform_sync(void)
         return;
     }
 
+    /* Show resolved IP for debugging */
+    {
+        char ip_msg[48];
+        UBYTE *ip = (UBYTE *)&ip_addr;
+        int i, val, pos;
+        strcpy(ip_msg, "Sending to ");
+        pos = 11;
+        /* Manual IP formatting since no sprintf */
+        for (i = 0; i < 4; i++) {
+            val = ip[i];
+            if (val >= 100) { ip_msg[pos++] = '0' + (val / 100); val %= 100; }
+            if (val >= 10 || ip[i] >= 100) { ip_msg[pos++] = '0' + (val / 10); val %= 10; }
+            ip_msg[pos++] = '0' + val;
+            if (i < 3) ip_msg[pos++] = '.';
+        }
+        ip_msg[pos++] = '.';
+        ip_msg[pos++] = '.';
+        ip_msg[pos++] = '.';
+        ip_msg[pos] = '\0';
+        update_status(STATUS_SYNCING, ip_msg);
+    }
+
     /* Step 2: Build and send SNTP request packet */
-    update_status(STATUS_SYNCING, "Sending request...");
     sntp_build_request(packet);
     if (!network_send_udp(ip_addr, NTP_PORT, packet, NTP_PACKET_SIZE)) {
         update_status(STATUS_ERROR, "Send failed");
         sync_in_progress = FALSE;
         return;
     }
+    update_status(STATUS_SYNCING, "Packet sent, waiting...");
 
     /* Step 3: Wait for response */
-    update_status(STATUS_SYNCING, "Waiting for response...");
     bytes = network_recv_udp(packet, NTP_PACKET_SIZE, 5);
     if (bytes < NTP_PACKET_SIZE) {
         update_status(STATUS_ERROR, "No response (timeout)");

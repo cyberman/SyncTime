@@ -113,7 +113,7 @@ BOOL network_send_udp(ULONG ip_addr, UWORD port,
     /* Build destination address */
     memset(&dest, 0, sizeof(dest));
     dest.sin_family = AF_INET;
-    dest.sin_port = port;           /* 68k is big-endian, no swap needed */
+    dest.sin_port = htons(port);    /* Convert to network byte order */
     dest.sin_addr.s_addr = ip_addr; /* already in network byte order */
 
     /* Send the packet */
@@ -143,6 +143,7 @@ LONG network_recv_udp(UBYTE *buf, ULONG buf_size, ULONG timeout_secs)
 {
     fd_set read_fds;
     struct timeval tv;
+    ULONG sigmask = 0;  /* No additional signals to wait on */
     LONG select_result;
     LONG result;
 
@@ -157,8 +158,10 @@ LONG network_recv_udp(UBYTE *buf, ULONG buf_size, ULONG timeout_secs)
     tv.tv_sec = timeout_secs;
     tv.tv_usec = 0;
 
-    /* Wait for data with timeout using WaitSelect */
-    select_result = WaitSelect(sock_fd + 1, &read_fds, NULL, NULL, &tv, NULL);
+    /* Wait for data with timeout using WaitSelect.
+     * Pass &sigmask (zero) instead of NULL - some stacks need this.
+     */
+    select_result = WaitSelect(sock_fd + 1, &read_fds, NULL, NULL, &tv, &sigmask);
 
     if (select_result <= 0) {
         /* Timeout (0) or error (-1) */
