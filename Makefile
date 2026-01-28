@@ -46,7 +46,7 @@ $(TZDB_DIR)/.downloaded:
 # Generate timezone table
 $(SRCDIR)/tz_table.c: $(TZDB_DIR)/.downloaded scripts/gen_tz_table.py
 	@echo "Generating timezone table..."
-	python3 scripts/gen_tz_table.py $(TZDB_DIR) > $@.tmp && mv $@.tmp $@
+	python3 scripts/gen_tz_table.py $(TZDB_DIR) 2>/dev/null > $@.tmp && mv $@.tmp $@
 
 all: $(OUT)
 
