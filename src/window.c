@@ -86,6 +86,9 @@ static Object *layout_log    = NULL;
 /* Log visibility state */
 static BOOL log_visible = FALSE;
 
+/* Log panel height for window resizing */
+#define LOG_PANEL_HEIGHT 120
+
 /* Timezone selection state */
 static ULONG current_region_idx = 0;
 static ULONG current_city_idx = 0;
@@ -640,6 +643,10 @@ static void toggle_log_panel(void)
                 GA_Text, (ULONG)"Hide Log",
                 TAG_DONE);
 
+            /* Resize window to accommodate log panel */
+            ChangeWindowBox(win, win->LeftEdge, win->TopEdge,
+                win->Width, win->Height + LOG_PANEL_HEIGHT);
+
             /* Refresh window layout */
             RethinkLayout((struct Gadget *)layout_root, win, NULL, TRUE);
 
@@ -672,6 +679,10 @@ static void toggle_log_panel(void)
             SetGadgetAttrs((struct Gadget *)gad_log_toggle, win, NULL,
                 GA_Text, (ULONG)"Show Log",
                 TAG_DONE);
+
+            /* Shrink window back to original size */
+            ChangeWindowBox(win, win->LeftEdge, win->TopEdge,
+                win->Width, win->Height - LOG_PANEL_HEIGHT);
 
             /* Refresh window layout */
             RethinkLayout((struct Gadget *)layout_root, win, NULL, TRUE);
