@@ -672,22 +672,22 @@ static void toggle_log_panel(void)
                 LAYOUT_RemoveChild, (ULONG)layout_log,
                 TAG_DONE);
 
-            /* Now safe to dispose (disposes gad_log too) */
-            DisposeObject(layout_log);
-            layout_log = NULL;
-            gad_log = NULL;
-
             /* Update button text */
             SetGadgetAttrs((struct Gadget *)gad_log_toggle, win, NULL,
                 GA_Text, (ULONG)"Show Log",
                 TAG_DONE);
 
-            /* Shrink window back to original size */
+            /* Shrink window FIRST, then rethink layout */
             ChangeWindowBox(win, win->LeftEdge, win->TopEdge,
                 win->Width, win->Height - LOG_PANEL_HEIGHT);
 
-            /* Refresh window layout */
+            /* Refresh window layout with new size */
             RethinkLayout((struct Gadget *)layout_root, win, NULL, TRUE);
+
+            /* NOW dispose the removed layout (after rethink is done) */
+            DisposeObject(layout_log);
+            layout_log = NULL;
+            gad_log = NULL;
 
             log_visible = FALSE;
         }
