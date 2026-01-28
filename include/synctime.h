@@ -23,13 +23,32 @@
 #include <proto/utility.h>
 #include <clib/alib_protos.h>
 
+/* Reaction includes */
+#include <classes/window.h>
+#include <gadgets/layout.h>
+#include <gadgets/button.h>
+#include <gadgets/string.h>
+#include <gadgets/integer.h>
+#include <gadgets/chooser.h>
+#include <gadgets/listbrowser.h>
+#include <images/label.h>
+
+#include <proto/window.h>
+#include <proto/layout.h>
+#include <proto/button.h>
+#include <proto/string.h>
+#include <proto/integer.h>
+#include <proto/chooser.h>
+#include <proto/listbrowser.h>
+#include <proto/label.h>
+
 #include <string.h>
 
 /* =========================================================================
  * Constants
  * ========================================================================= */
 
-#define LIB_VERSION 39  /* AmigaOS 3.0 minimum */
+#define LIB_VERSION 44  /* AmigaOS 3.2 minimum for Reaction */
 
 /* NTP constants */
 #define NTP_PORT           123
@@ -187,5 +206,15 @@ extern struct Library       *CxBase;
 extern struct Library       *UtilityBase;
 extern struct Library       *SocketBase;
 extern struct Device        *TimerBase;
+
+/* Reaction class library bases */
+extern struct Library       *WindowBase;
+extern struct Library       *LayoutBase;
+extern struct Library       *ButtonBase;
+extern struct Library       *StringBase;
+extern struct Library       *IntegerBase;
+extern struct Library       *ChooserBase;
+extern struct Library       *ListBrowserBase;
+extern struct Library       *LabelBase;
 
 #endif /* SYNCTIME_H */

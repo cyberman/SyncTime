@@ -27,6 +27,16 @@ struct Library       *UtilityBase   = NULL;
 struct Library       *SocketBase    = NULL;
 struct Device        *TimerBase     = NULL;
 
+/* Reaction class library bases */
+struct Library       *WindowBase      = NULL;
+struct Library       *LayoutBase      = NULL;
+struct Library       *ButtonBase      = NULL;
+struct Library       *StringBase      = NULL;
+struct Library       *IntegerBase     = NULL;
+struct Library       *ChooserBase     = NULL;
+struct Library       *ListBrowserBase = NULL;
+struct Library       *LabelBase       = NULL;
+
 /* Commodity state */
 static CxObj *broker    = NULL;
 static struct MsgPort *broker_port = NULL;
@@ -77,6 +87,39 @@ static BOOL open_libraries(void)
     if (UtilityBase == NULL)
         return FALSE;
 
+    /* Reaction classes */
+    WindowBase = OpenLibrary("window.class", LIB_VERSION);
+    if (WindowBase == NULL)
+        return FALSE;
+
+    LayoutBase = OpenLibrary("gadgets/layout.gadget", LIB_VERSION);
+    if (LayoutBase == NULL)
+        return FALSE;
+
+    ButtonBase = OpenLibrary("gadgets/button.gadget", LIB_VERSION);
+    if (ButtonBase == NULL)
+        return FALSE;
+
+    StringBase = OpenLibrary("gadgets/string.gadget", LIB_VERSION);
+    if (StringBase == NULL)
+        return FALSE;
+
+    IntegerBase = OpenLibrary("gadgets/integer.gadget", LIB_VERSION);
+    if (IntegerBase == NULL)
+        return FALSE;
+
+    ChooserBase = OpenLibrary("gadgets/chooser.gadget", LIB_VERSION);
+    if (ChooserBase == NULL)
+        return FALSE;
+
+    ListBrowserBase = OpenLibrary("gadgets/listbrowser.gadget", LIB_VERSION);
+    if (ListBrowserBase == NULL)
+        return FALSE;
+
+    LabelBase = OpenLibrary("images/label.image", LIB_VERSION);
+    if (LabelBase == NULL)
+        return FALSE;
+
     /* bsdsocket.library is opened by network_init() */
     /* timer.device is opened by clock_init() */
 
@@ -86,6 +129,42 @@ static BOOL open_libraries(void)
 static void close_libraries(void)
 {
     /* Close in reverse order; NULL-safe */
+
+    /* Reaction classes first (reverse order of opening) */
+    if (LabelBase != NULL) {
+        CloseLibrary(LabelBase);
+        LabelBase = NULL;
+    }
+    if (ListBrowserBase != NULL) {
+        CloseLibrary(ListBrowserBase);
+        ListBrowserBase = NULL;
+    }
+    if (ChooserBase != NULL) {
+        CloseLibrary(ChooserBase);
+        ChooserBase = NULL;
+    }
+    if (IntegerBase != NULL) {
+        CloseLibrary(IntegerBase);
+        IntegerBase = NULL;
+    }
+    if (StringBase != NULL) {
+        CloseLibrary(StringBase);
+        StringBase = NULL;
+    }
+    if (ButtonBase != NULL) {
+        CloseLibrary(ButtonBase);
+        ButtonBase = NULL;
+    }
+    if (LayoutBase != NULL) {
+        CloseLibrary(LayoutBase);
+        LayoutBase = NULL;
+    }
+    if (WindowBase != NULL) {
+        CloseLibrary(WindowBase);
+        WindowBase = NULL;
+    }
+
+    /* Standard libraries */
     if (UtilityBase != NULL) {
         CloseLibrary(UtilityBase);
         UtilityBase = NULL;

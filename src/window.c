@@ -1,101 +1,195 @@
-/* window.c - GadTools configuration/status window for SyncTime
+/* window.c - Reaction configuration/status window for SyncTime
  *
- * Opens a GadTools window on the default public screen (Workbench)
- * showing sync status and editable configuration fields.
+ * Uses Reaction (BOOPSI) GUI toolkit for AmigaOS 3.2+
+ * Opens a WindowObject with nested LayoutObjects showing sync status
+ * and editable configuration fields.
  * Opened via Exchange "Show" or the commodity hotkey.
+ *
+ * Note: We use explicit NewObject calls with tag arrays instead of
+ * the convenience macros, for cross-compiler compatibility.
  */
 
 #include "synctime.h"
+
+/* Reaction includes - need the gadget headers for tag definitions */
+#include <gadgets/layout.h>
+#include <gadgets/button.h>
+#include <gadgets/string.h>
+#include <gadgets/integer.h>
+#include <gadgets/chooser.h>
+#include <gadgets/listbrowser.h>
+#include <images/label.h>
+#include <images/bevel.h>
+#include <classes/window.h>
+
+/* Reaction class protos for GetClass functions and utilities */
+#include <proto/layout.h>
+#include <proto/button.h>
+#include <proto/string.h>
+#include <proto/integer.h>
+#include <proto/chooser.h>
+#include <proto/listbrowser.h>
+#include <proto/label.h>
+#include <proto/window.h>
+
+/* For DoMethod */
+#include <clib/alib_protos.h>
 
 /* =========================================================================
  * Gadget IDs
  * ========================================================================= */
 
-#define GID_STATUS     0
-#define GID_LAST_SYNC  1
-#define GID_NEXT_SYNC  2
-#define GID_LOG        3
-#define GID_SERVER     4
-#define GID_INTERVAL   5
-#define GID_REGION     6
-#define GID_CITY       7
-#define GID_TZ_INFO    8
-#define GID_SYNC       9
-#define GID_SAVE       10
-#define GID_HIDE       11
+#define GID_STATUS      1
+#define GID_LAST_SYNC   2
+#define GID_NEXT_SYNC   3
+#define GID_SERVER      4
+#define GID_INTERVAL    5
+#define GID_REGION      6
+#define GID_CITY        7
+#define GID_TZ_INFO     8
+#define GID_SYNC        9
+#define GID_SAVE        10
+#define GID_HIDE        11
+#define GID_LOG_TOGGLE  12
+#define GID_LOG         13
 
 /* Log system */
 #define LOG_MAX_ENTRIES 50
 #define LOG_LINE_LEN    64
 
+/* Maximum regions for chooser */
+#define MAX_REGIONS     20
+
 /* =========================================================================
  * Static module state
  * ========================================================================= */
 
-static struct Window *win   = NULL;
-static struct Gadget *glist = NULL;
-static APTR vi              = NULL;   /* VisualInfo */
+static Object *window_obj = NULL;
+static struct Window *win = NULL;
 
-/* Individual gadget pointers for updating */
-static struct Gadget *gad_status    = NULL;
-static struct Gadget *gad_last_sync = NULL;
-static struct Gadget *gad_next_sync = NULL;
-static struct Gadget *gad_log       = NULL;
-static struct Gadget *gad_server    = NULL;
-static struct Gadget *gad_interval  = NULL;
-static struct Gadget *gad_region    = NULL;
-static struct Gadget *gad_city      = NULL;
-static struct Gadget *gad_tz_info   = NULL;
+/* Gadget object pointers */
+static Object *gad_status    = NULL;
+static Object *gad_last_sync = NULL;
+static Object *gad_next_sync = NULL;
+static Object *gad_server    = NULL;
+static Object *gad_interval  = NULL;
+static Object *gad_region    = NULL;
+static Object *gad_city      = NULL;
+static Object *gad_tz_info   = NULL;
+static Object *gad_log       = NULL;
+static Object *gad_log_toggle = NULL;
 
-/* Local edit state */
-static BOOL config_changed  = FALSE;
+/* Layout objects */
+static Object *layout_root   = NULL;
+static Object *layout_log    = NULL;
 
-/* Region/City picker state */
+/* Log visibility state */
+static BOOL log_visible = FALSE;
+
+/* Timezone selection state */
 static ULONG current_region_idx = 0;
 static ULONG current_city_idx = 0;
-
-/* City list for LISTVIEW_KIND */
-static struct List city_list_header;
-static struct Node city_nodes[200];
-static ULONG city_node_count = 0;
 static const TZEntry **current_cities = NULL;
 static ULONG current_city_count = 0;
 
-/* Log entries stored as Exec List of Node structures */
-static struct List log_list;
+/* Chooser list for regions */
+static struct List region_chooser_list;
+static BOOL region_list_initialized = FALSE;
+
+/* ListBrowser list for cities */
+static struct List city_browser_list;
+static BOOL city_list_initialized = FALSE;
+
+/* ListBrowser list for log */
+static struct List log_browser_list;
+static BOOL log_list_initialized = FALSE;
 static LONG log_count = 0;
 
-/* Log node structure - Node followed by text buffer */
-struct LogNode {
-    struct Node node;
-    char text[LOG_LINE_LEN];
-};
-
-static struct LogNode log_nodes[LOG_MAX_ENTRIES];
-static LONG log_next_slot = 0;
+/* Buffer for text displays */
+static char status_buf[64] = "Idle";
+static char last_sync_buf[32] = "Never";
+static char next_sync_buf[32] = "Pending";
+static char tz_info_buf[64] = "UTC";
 
 /* =========================================================================
- * Helper functions for region/city picker
+ * Helper functions for Chooser/ListBrowser list management
  * ========================================================================= */
 
-/* Build the city list for a given region */
-static void build_city_list(const char *region)
+/* Free all nodes from a chooser list */
+static void free_chooser_list(struct List *list)
 {
-    ULONG i;
-    current_cities = tz_get_cities_for_region(region, &current_city_count);
-    NewList(&city_list_header);
-    city_node_count = 0;
-    for (i = 0; i < current_city_count && i < 200; i++) {
-        city_nodes[i].ln_Name = (STRPTR)current_cities[i]->city;
-        city_nodes[i].ln_Type = 0;
-        city_nodes[i].ln_Pri = 0;
-        AddTail(&city_list_header, &city_nodes[i]);
-        city_node_count++;
+    struct Node *node;
+    while ((node = RemHead(list)) != NULL) {
+        FreeChooserNode(node);
     }
 }
 
-/* Buffer for timezone info display */
-static char tz_info_buf[64];
+/* Free all nodes from a listbrowser list */
+static void free_listbrowser_list(struct List *list)
+{
+    struct Node *node;
+    while ((node = RemHead(list)) != NULL) {
+        FreeListBrowserNode(node);
+    }
+}
+
+/* Build the region chooser list */
+static void build_region_chooser_list(void)
+{
+    const char **regions;
+    ULONG region_count, i;
+    struct Node *node;
+
+    if (!region_list_initialized) {
+        NewList(&region_chooser_list);
+        region_list_initialized = TRUE;
+    } else {
+        free_chooser_list(&region_chooser_list);
+    }
+
+    regions = tz_get_regions(&region_count);
+    for (i = 0; i < region_count && i < MAX_REGIONS; i++) {
+        node = AllocChooserNode(CNA_Text, (ULONG)regions[i], TAG_DONE);
+        if (node) {
+            AddTail(&region_chooser_list, node);
+        }
+    }
+}
+
+/* Build the city listbrowser list for a given region */
+static void build_city_browser_list(const char *region)
+{
+    ULONG i;
+    struct Node *node;
+
+    if (!city_list_initialized) {
+        NewList(&city_browser_list);
+        city_list_initialized = TRUE;
+    } else {
+        free_listbrowser_list(&city_browser_list);
+    }
+
+    current_cities = tz_get_cities_for_region(region, &current_city_count);
+    for (i = 0; i < current_city_count; i++) {
+        node = AllocListBrowserNode(1,
+            LBNA_Column, 0,
+            LBNCA_Text, (ULONG)current_cities[i]->city,
+            TAG_DONE);
+        if (node) {
+            AddTail(&city_browser_list, node);
+        }
+    }
+}
+
+/* Initialize log list */
+static void init_log_list(void)
+{
+    if (!log_list_initialized) {
+        NewList(&log_browser_list);
+        log_list_initialized = TRUE;
+        log_count = 0;
+    }
+}
 
 /* Format timezone info string for display */
 static void format_tz_info(const TZEntry *tz)
@@ -134,7 +228,6 @@ static void format_tz_info(const TZEntry *tz)
 
     /* Add DST info */
     if (tz->dst_offset_mins > 0) {
-        /* Has DST */
         strcpy(p, ", DST active seasonally");
     } else {
         strcpy(p, " (no DST)");
@@ -142,348 +235,326 @@ static void format_tz_info(const TZEntry *tz)
 }
 
 /* =========================================================================
- * window_open -- create and display the GadTools configuration window
+ * Helper: Create a label object
  * ========================================================================= */
-
-/* Initialize log list (called once) */
-static BOOL log_initialized = FALSE;
-static void init_log_list(void)
+static Object *create_label(const char *text)
 {
-    LONG i;
-    if (log_initialized)
-        return;
-    NewList(&log_list);
-    for (i = 0; i < LOG_MAX_ENTRIES; i++) {
-        log_nodes[i].node.ln_Succ = NULL;
-        log_nodes[i].node.ln_Pred = NULL;
-        log_nodes[i].text[0] = '\0';
-    }
-    log_next_slot = 0;
-    log_count = 0;
-    log_initialized = TRUE;
+    return NewObject(LABEL_GetClass(), NULL,
+        LABEL_Text, (ULONG)text,
+        TAG_DONE);
 }
+
+/* =========================================================================
+ * Helper: Create a read-only string gadget for display
+ * ========================================================================= */
+static Object *create_display_string(ULONG id, const char *text)
+{
+    return NewObject(STRING_GetClass(), NULL,
+        GA_ID, id,
+        GA_ReadOnly, TRUE,
+        STRINGA_TextVal, (ULONG)text,
+        TAG_DONE);
+}
+
+/* =========================================================================
+ * Helper: Create a horizontal row with label and gadget
+ * ========================================================================= */
+static Object *create_label_row(const char *label_text, Object *gadget)
+{
+    Object *label = create_label(label_text);
+    if (!label) return NULL;
+
+    return NewObject(LAYOUT_GetClass(), NULL,
+        LAYOUT_Orientation, LAYOUT_ORIENT_HORIZ,
+        LAYOUT_AddChild, (ULONG)label,
+        CHILD_WeightedWidth, 0,
+        LAYOUT_AddChild, (ULONG)gadget,
+        TAG_DONE);
+}
+
+/* =========================================================================
+ * window_open -- create and display the Reaction configuration window
+ * ========================================================================= */
 
 BOOL window_open(struct Screen *screen)
 {
-    struct Screen *pub;
-    struct TextAttr *font;
-    UWORD fonth, topoff, leftoff, label_width, gad_left, gad_width, win_width;
-    UWORD spacing, y;
-    struct Gadget *gad;
-    struct NewGadget ng;
     SyncConfig *cfg;
+    const char **regions;
+    ULONG region_count, i;
+    const TZEntry *tz;
+    Object *status_group, *settings_group, *timezone_group, *button_row;
+    Object *row;
 
-    (void)screen;  /* Not used -- we lock the default public screen */
+    (void)screen;  /* Not used -- we open on default public screen */
 
     /* Initialize log list if needed */
     init_log_list();
 
-    if (win)
+    if (window_obj)
         return TRUE;   /* Already open */
 
     /* Read current config so gadgets reflect live values */
     cfg = config_get();
-    config_changed = FALSE;
 
     /* Find current timezone in table and set up region/city indices */
-    {
-        const TZEntry *tz;
-        const char **regions;
-        ULONG region_count, i;
+    regions = tz_get_regions(&region_count);
+    tz = tz_find_by_name(cfg->tz_name);
 
-        regions = tz_get_regions(&region_count);
-        tz = tz_find_by_name(cfg->tz_name);
-
-        if (tz) {
-            /* Find region index */
-            for (i = 0; i < region_count; i++) {
-                if (strcmp(regions[i], tz->region) == 0) {
-                    current_region_idx = i;
-                    break;
-                }
+    if (tz) {
+        /* Find region index */
+        for (i = 0; i < region_count; i++) {
+            if (strcmp(regions[i], tz->region) == 0) {
+                current_region_idx = i;
+                break;
             }
-            /* Build city list and find city index */
-            build_city_list(tz->region);
-            for (i = 0; i < current_city_count; i++) {
-                if (strcmp(current_cities[i]->name, cfg->tz_name) == 0) {
-                    current_city_idx = i;
-                    break;
-                }
-            }
-        } else {
-            current_region_idx = 0;
-            build_city_list(regions[0]);
-            current_city_idx = 0;
         }
-    }
-
-    /* Lock default public screen (Workbench) */
-    pub = LockPubScreen(NULL);
-    if (!pub)
-        return FALSE;
-
-    vi = GetVisualInfo(pub, TAG_DONE);
-    if (!vi) {
-        UnlockPubScreen(NULL, pub);
-        return FALSE;
-    }
-
-    /* Font-relative sizing */
-    font       = pub->Font;
-    fonth      = font->ta_YSize;
-    topoff     = pub->WBorTop + fonth + 1;
-    leftoff    = pub->WBorLeft + 4;
-    label_width = 80;
-    gad_left   = leftoff + label_width;
-    gad_width  = 220;
-    win_width  = gad_left + gad_width + pub->WBorRight + 8;
-    spacing    = fonth + 6;
-    y          = topoff + 4;
-
-    /* Create gadget context */
-    gad = CreateContext(&glist);
-    if (!gad) {
-        FreeVisualInfo(vi);
-        vi = NULL;
-        UnlockPubScreen(NULL, pub);
-        return FALSE;
-    }
-
-    memset(&ng, 0, sizeof(ng));
-    ng.ng_VisualInfo = vi;
-    ng.ng_TextAttr   = font;
-
-    /* ---- Status (TEXT_KIND) ---- */
-    ng.ng_LeftEdge   = gad_left;
-    ng.ng_TopEdge    = y;
-    ng.ng_Width      = gad_width;
-    ng.ng_Height     = fonth + 4;
-    ng.ng_GadgetText = "Status:";
-    ng.ng_GadgetID   = GID_STATUS;
-    ng.ng_Flags      = PLACETEXT_LEFT;
-    gad_status = gad = CreateGadget(TEXT_KIND, gad, &ng,
-        GTTX_Text,   (ULONG)"Idle",
-        GTTX_Border, TRUE,
-        TAG_DONE);
-    y += spacing;
-
-    /* ---- Last sync (TEXT_KIND) ---- */
-    ng.ng_TopEdge    = y;
-    ng.ng_GadgetText = "Last sync:";
-    ng.ng_GadgetID   = GID_LAST_SYNC;
-    gad_last_sync = gad = CreateGadget(TEXT_KIND, gad, &ng,
-        GTTX_Text,   (ULONG)"Never",
-        GTTX_Border, TRUE,
-        TAG_DONE);
-    y += spacing;
-
-    /* ---- Next sync (TEXT_KIND) ---- */
-    ng.ng_TopEdge    = y;
-    ng.ng_GadgetText = "Next sync:";
-    ng.ng_GadgetID   = GID_NEXT_SYNC;
-    gad_next_sync = gad = CreateGadget(TEXT_KIND, gad, &ng,
-        GTTX_Text,   (ULONG)"Pending",
-        GTTX_Border, TRUE,
-        TAG_DONE);
-    y += spacing;
-
-    /* Extra gap before log */
-    y += 4;
-
-    /* ---- Log (LISTVIEW_KIND) ---- */
-    ng.ng_TopEdge    = y;
-    ng.ng_GadgetText = "Log:";
-    ng.ng_GadgetID   = GID_LOG;
-    ng.ng_Height     = fonth * 5 + 4;  /* 5 lines visible */
-    gad_log = gad = CreateGadget(LISTVIEW_KIND, gad, &ng,
-        GTLV_Labels,     (ULONG)&log_list,
-        GTLV_ReadOnly,   TRUE,
-        GTLV_ScrollWidth, 16,
-        TAG_DONE);
-    y += ng.ng_Height + 4;
-
-    /* Reset height for other gadgets */
-    ng.ng_Height = fonth + 4;
-
-    /* Extra gap before editable section */
-    y += 4;
-
-    /* ---- Server (STRING_KIND) ---- */
-    ng.ng_TopEdge    = y;
-    ng.ng_GadgetText = "Server:";
-    ng.ng_GadgetID   = GID_SERVER;
-    gad_server = gad = CreateGadget(STRING_KIND, gad, &ng,
-        GTST_String,   (ULONG)cfg->server,
-        GTST_MaxChars, SERVER_NAME_MAX - 1,
-        TAG_DONE);
-    y += spacing;
-
-    /* ---- Interval (INTEGER_KIND) ---- */
-    ng.ng_TopEdge    = y;
-    ng.ng_GadgetText = "Interval:";
-    ng.ng_GadgetID   = GID_INTERVAL;
-    gad_interval = gad = CreateGadget(INTEGER_KIND, gad, &ng,
-        GTIN_Number,   cfg->interval,
-        GTIN_MaxChars, 6,
-        TAG_DONE);
-    y += spacing;
-
-    /* ---- Region (CYCLE_KIND) ---- */
-    {
-        const char **regions = tz_get_regions(NULL);
-        ng.ng_TopEdge    = y;
-        ng.ng_Width      = gad_width;
-        ng.ng_GadgetText = "Region:";
-        ng.ng_GadgetID   = GID_REGION;
-        ng.ng_Flags      = PLACETEXT_LEFT;
-        gad_region = gad = CreateGadget(CYCLE_KIND, gad, &ng,
-            GTCY_Labels, (ULONG)regions,
-            GTCY_Active, current_region_idx,
-            TAG_DONE);
-        y += spacing;
-    }
-
-    /* ---- City (LISTVIEW_KIND) ---- */
-    ng.ng_TopEdge    = y;
-    ng.ng_Height     = fonth * 5 + 4;  /* 5 lines visible */
-    ng.ng_GadgetText = "City:";
-    ng.ng_GadgetID   = GID_CITY;
-    gad_city = gad = CreateGadget(LISTVIEW_KIND, gad, &ng,
-        GTLV_Labels, (ULONG)&city_list_header,
-        GTLV_ShowSelected, (ULONG)NULL,
-        GTLV_Selected, current_city_idx,
-        GTLV_ScrollWidth, 16,
-        TAG_DONE);
-    y += ng.ng_Height + 4;
-    ng.ng_Height = fonth + 4;  /* Reset height */
-
-    /* ---- TZ Info (TEXT_KIND) ---- */
-    if (current_city_count > 0 && current_city_idx < current_city_count)
-        format_tz_info(current_cities[current_city_idx]);
-    else
+        /* Build city list and find city index */
+        build_city_browser_list(tz->region);
+        for (i = 0; i < current_city_count; i++) {
+            if (strcmp(current_cities[i]->name, cfg->tz_name) == 0) {
+                current_city_idx = i;
+                break;
+            }
+        }
+        format_tz_info(tz);
+    } else {
+        current_region_idx = 0;
+        if (region_count > 0) {
+            build_city_browser_list(regions[0]);
+        }
+        current_city_idx = 0;
         format_tz_info(NULL);
-    ng.ng_TopEdge    = y;
-    ng.ng_GadgetText = NULL;
-    ng.ng_GadgetID   = GID_TZ_INFO;
-    ng.ng_Flags      = 0;
-    gad_tz_info = gad = CreateGadget(TEXT_KIND, gad, &ng,
-        GTTX_Text, (ULONG)tz_info_buf,
-        GTTX_Border, TRUE,
+    }
+
+    /* Build chooser list for regions */
+    build_region_chooser_list();
+
+    /* Create status display gadgets */
+    gad_status = create_display_string(GID_STATUS, status_buf);
+    gad_last_sync = create_display_string(GID_LAST_SYNC, last_sync_buf);
+    gad_next_sync = create_display_string(GID_NEXT_SYNC, next_sync_buf);
+
+    if (!gad_status || !gad_last_sync || !gad_next_sync)
+        goto cleanup;
+
+    /* Create status group */
+    status_group = NewObject(LAYOUT_GetClass(), NULL,
+        LAYOUT_Orientation, LAYOUT_ORIENT_VERT,
+        LAYOUT_BevelStyle, BVS_GROUP,
+        LAYOUT_Label, (ULONG)"Status",
+        LAYOUT_SpaceOuter, TRUE,
+        LAYOUT_AddChild, (ULONG)create_label_row("Status:", gad_status),
+        LAYOUT_AddChild, (ULONG)create_label_row("Last sync:", gad_last_sync),
+        LAYOUT_AddChild, (ULONG)create_label_row("Next sync:", gad_next_sync),
         TAG_DONE);
-    y += spacing;
 
-    /* Extra gap before buttons */
-    y += 10;
+    if (!status_group)
+        goto cleanup;
 
-    /* Button row: Sync Now, Save, Hide (3 buttons with 5px gaps) */
-    {
-        UWORD btn_width = (gad_width - 10) / 3;  /* 3 buttons, 2 gaps of 5px */
-        UWORD btn_gap = 5;
+    /* Create server and interval gadgets */
+    gad_server = NewObject(STRING_GetClass(), NULL,
+        GA_ID, GID_SERVER,
+        STRINGA_TextVal, (ULONG)cfg->server,
+        STRINGA_MaxChars, SERVER_NAME_MAX - 1,
+        TAG_DONE);
 
-        ng.ng_TopEdge    = y;
-        ng.ng_Height     = fonth + 6;
-        ng.ng_Flags      = PLACETEXT_IN;
+    gad_interval = NewObject(INTEGER_GetClass(), NULL,
+        GA_ID, GID_INTERVAL,
+        INTEGER_Number, cfg->interval,
+        INTEGER_MaxChars, 6,
+        INTEGER_Minimum, MIN_INTERVAL,
+        INTEGER_Maximum, MAX_INTERVAL,
+        TAG_DONE);
 
-        /* ---- Sync Now button ---- */
-        ng.ng_LeftEdge   = gad_left;
-        ng.ng_Width      = btn_width;
-        ng.ng_GadgetText = "Sync Now";
-        ng.ng_GadgetID   = GID_SYNC;
-        gad = CreateGadget(BUTTON_KIND, gad, &ng, TAG_DONE);
+    if (!gad_server || !gad_interval)
+        goto cleanup;
 
-        /* ---- Save button ---- */
-        ng.ng_LeftEdge   = gad_left + btn_width + btn_gap;
-        ng.ng_GadgetText = "Save";
-        ng.ng_GadgetID   = GID_SAVE;
-        gad = CreateGadget(BUTTON_KIND, gad, &ng, TAG_DONE);
+    /* Create settings group */
+    settings_group = NewObject(LAYOUT_GetClass(), NULL,
+        LAYOUT_Orientation, LAYOUT_ORIENT_VERT,
+        LAYOUT_BevelStyle, BVS_GROUP,
+        LAYOUT_Label, (ULONG)"Settings",
+        LAYOUT_SpaceOuter, TRUE,
+        LAYOUT_AddChild, (ULONG)create_label_row("Server:", gad_server),
+        LAYOUT_AddChild, (ULONG)create_label_row("Interval (sec):", gad_interval),
+        TAG_DONE);
 
-        /* ---- Hide button ---- */
-        ng.ng_LeftEdge   = gad_left + 2 * (btn_width + btn_gap);
-        ng.ng_GadgetText = "Hide";
-        ng.ng_GadgetID   = GID_HIDE;
-        gad = CreateGadget(BUTTON_KIND, gad, &ng, TAG_DONE);
+    if (!settings_group)
+        goto cleanup;
 
-        y += ng.ng_Height;
-    }
+    /* Create region chooser */
+    gad_region = NewObject(CHOOSER_GetClass(), NULL,
+        GA_ID, GID_REGION,
+        GA_RelVerify, TRUE,
+        CHOOSER_Labels, (ULONG)&region_chooser_list,
+        CHOOSER_Selected, current_region_idx,
+        TAG_DONE);
 
-    if (!gad) {
-        /* One or more gadgets failed to create */
-        FreeGadgets(glist);
-        glist = NULL;
-        FreeVisualInfo(vi);
-        vi = NULL;
-        gad_status = gad_last_sync = gad_next_sync = gad_log = NULL;
-        gad_server = gad_interval = NULL;
-        gad_region = gad_city = gad_tz_info = NULL;
-        UnlockPubScreen(NULL, pub);
-        return FALSE;
-    }
+    /* Create city listbrowser */
+    gad_city = NewObject(LISTBROWSER_GetClass(), NULL,
+        GA_ID, GID_CITY,
+        GA_RelVerify, TRUE,
+        LISTBROWSER_Labels, (ULONG)&city_browser_list,
+        LISTBROWSER_Selected, current_city_idx,
+        LISTBROWSER_ShowSelected, TRUE,
+        LISTBROWSER_AutoFit, TRUE,
+        TAG_DONE);
+
+    /* Create TZ info display */
+    gad_tz_info = create_display_string(GID_TZ_INFO, tz_info_buf);
+
+    if (!gad_region || !gad_city || !gad_tz_info)
+        goto cleanup;
+
+    /* Create city row with minimum height */
+    row = NewObject(LAYOUT_GetClass(), NULL,
+        LAYOUT_Orientation, LAYOUT_ORIENT_HORIZ,
+        LAYOUT_AddChild, (ULONG)create_label("City:"),
+        CHILD_WeightedWidth, 0,
+        LAYOUT_AddChild, (ULONG)gad_city,
+        TAG_DONE);
+
+    /* Create timezone group */
+    timezone_group = NewObject(LAYOUT_GetClass(), NULL,
+        LAYOUT_Orientation, LAYOUT_ORIENT_VERT,
+        LAYOUT_BevelStyle, BVS_GROUP,
+        LAYOUT_Label, (ULONG)"Timezone",
+        LAYOUT_SpaceOuter, TRUE,
+        LAYOUT_AddChild, (ULONG)create_label_row("Region:", gad_region),
+        LAYOUT_AddChild, (ULONG)row,
+        CHILD_MinHeight, 80,
+        LAYOUT_AddChild, (ULONG)gad_tz_info,
+        TAG_DONE);
+
+    if (!timezone_group)
+        goto cleanup;
+
+    /* Create buttons */
+    gad_log_toggle = NewObject(BUTTON_GetClass(), NULL,
+        GA_ID, GID_LOG_TOGGLE,
+        GA_RelVerify, TRUE,
+        GA_Text, (ULONG)"Show Log",
+        TAG_DONE);
+
+    /* Create button row */
+    button_row = NewObject(LAYOUT_GetClass(), NULL,
+        LAYOUT_Orientation, LAYOUT_ORIENT_HORIZ,
+        LAYOUT_EvenSize, TRUE,
+        LAYOUT_SpaceOuter, TRUE,
+        LAYOUT_AddChild, (ULONG)NewObject(BUTTON_GetClass(), NULL,
+            GA_ID, GID_SYNC,
+            GA_RelVerify, TRUE,
+            GA_Text, (ULONG)"Sync Now",
+            TAG_DONE),
+        LAYOUT_AddChild, (ULONG)NewObject(BUTTON_GetClass(), NULL,
+            GA_ID, GID_SAVE,
+            GA_RelVerify, TRUE,
+            GA_Text, (ULONG)"Save",
+            TAG_DONE),
+        LAYOUT_AddChild, (ULONG)gad_log_toggle,
+        LAYOUT_AddChild, (ULONG)NewObject(BUTTON_GetClass(), NULL,
+            GA_ID, GID_HIDE,
+            GA_RelVerify, TRUE,
+            GA_Text, (ULONG)"Hide",
+            TAG_DONE),
+        TAG_DONE);
+
+    if (!button_row)
+        goto cleanup;
+
+    /* Create root layout */
+    layout_root = NewObject(LAYOUT_GetClass(), NULL,
+        LAYOUT_Orientation, LAYOUT_ORIENT_VERT,
+        LAYOUT_SpaceOuter, TRUE,
+        LAYOUT_BevelStyle, BVS_THIN,
+        LAYOUT_AddChild, (ULONG)status_group,
+        CHILD_WeightedHeight, 0,
+        LAYOUT_AddChild, (ULONG)settings_group,
+        CHILD_WeightedHeight, 0,
+        LAYOUT_AddChild, (ULONG)timezone_group,
+        LAYOUT_AddChild, (ULONG)button_row,
+        CHILD_WeightedHeight, 0,
+        TAG_DONE);
+
+    if (!layout_root)
+        goto cleanup;
+
+    /* Create window object */
+    window_obj = NewObject(WINDOW_GetClass(), NULL,
+        WA_Title, (ULONG)"SyncTime",
+        WA_DragBar, TRUE,
+        WA_CloseGadget, TRUE,
+        WA_DepthGadget, TRUE,
+        WA_Activate, TRUE,
+        WA_SizeGadget, TRUE,
+        WINDOW_Position, WPOS_CENTERSCREEN,
+        WINDOW_ParentGroup, (ULONG)layout_root,
+        TAG_DONE);
+
+    if (!window_obj)
+        goto cleanup;
 
     /* Open the window */
-    win = OpenWindowTags(NULL,
-        WA_Left,        100,
-        WA_Top,         50,
-        WA_Width,       win_width,
-        WA_Height,      y + fonth + 8 + pub->WBorBottom,
-        WA_Title,       (ULONG)"SyncTime",
-        WA_PubScreen,   (ULONG)pub,
-        WA_Gadgets,     (ULONG)glist,
-        WA_IDCMP,       IDCMP_CLOSEWINDOW | IDCMP_REFRESHWINDOW |
-                        BUTTONIDCMP | STRINGIDCMP | CYCLEIDCMP |
-                        LISTVIEWIDCMP,
-        WA_DragBar,     TRUE,
-        WA_DepthGadget, TRUE,
-        WA_CloseGadget, TRUE,
-        WA_Activate,    TRUE,
-        WA_RMBTrap,     TRUE,
-        TAG_DONE);
-
+    win = (struct Window *)DoMethod(window_obj, WM_OPEN, NULL);
     if (!win) {
-        FreeGadgets(glist);
-        glist = NULL;
-        FreeVisualInfo(vi);
-        vi = NULL;
-        gad_status = gad_last_sync = gad_next_sync = gad_log = NULL;
-        gad_server = gad_interval = NULL;
-        gad_region = gad_city = gad_tz_info = NULL;
-        UnlockPubScreen(NULL, pub);
+        DisposeObject(window_obj);
+        window_obj = NULL;
         return FALSE;
     }
 
-    GT_RefreshWindow(win, NULL);
-    UnlockPubScreen(NULL, pub);
+    log_visible = FALSE;
 
     return TRUE;
+
+cleanup:
+    /* Clean up any partially created objects */
+    if (gad_status) DisposeObject(gad_status);
+    if (gad_last_sync) DisposeObject(gad_last_sync);
+    if (gad_next_sync) DisposeObject(gad_next_sync);
+    if (gad_server) DisposeObject(gad_server);
+    if (gad_interval) DisposeObject(gad_interval);
+    if (gad_region) DisposeObject(gad_region);
+    if (gad_city) DisposeObject(gad_city);
+    if (gad_tz_info) DisposeObject(gad_tz_info);
+    if (gad_log_toggle) DisposeObject(gad_log_toggle);
+    gad_status = gad_last_sync = gad_next_sync = NULL;
+    gad_server = gad_interval = NULL;
+    gad_region = gad_city = gad_tz_info = NULL;
+    gad_log_toggle = NULL;
+    return FALSE;
 }
 
 /* =========================================================================
- * window_close -- tear down window and free all GadTools resources
+ * window_close -- tear down window and free all Reaction resources
  * ========================================================================= */
 
 void window_close(void)
 {
     if (win) {
-        CloseWindow(win);
+        DoMethod(window_obj, WM_CLOSE, NULL);
         win = NULL;
     }
-    if (glist) {
-        FreeGadgets(glist);
-        glist = NULL;
-    }
-    if (vi) {
-        FreeVisualInfo(vi);
-        vi = NULL;
+    if (window_obj) {
+        DisposeObject(window_obj);
+        window_obj = NULL;
     }
 
-    gad_status    = NULL;
-    gad_last_sync = NULL;
-    gad_next_sync = NULL;
-    gad_log       = NULL;
-    gad_server    = NULL;
-    gad_interval  = NULL;
-    gad_region    = NULL;
-    gad_city      = NULL;
-    gad_tz_info   = NULL;
+    /* Free list nodes */
+    if (region_list_initialized) {
+        free_chooser_list(&region_chooser_list);
+    }
+    if (city_list_initialized) {
+        free_listbrowser_list(&city_browser_list);
+    }
+    /* Note: log list is preserved across window open/close */
+
+    /* Reset object pointers */
+    layout_root = layout_log = NULL;
+    gad_status = gad_last_sync = gad_next_sync = NULL;
+    gad_server = gad_interval = NULL;
+    gad_region = gad_city = gad_tz_info = NULL;
+    gad_log = gad_log_toggle = NULL;
+    log_visible = FALSE;
 }
 
 /* =========================================================================
@@ -493,114 +564,6 @@ void window_close(void)
 BOOL window_is_open(void)
 {
     return (win != NULL);
-}
-
-/* =========================================================================
- * window_handle_events -- process all pending Intuition/GadTools messages
- *
- * cfg: pointer to live config struct (updated on Save)
- * st:  pointer to sync status (currently unused here, reserved for future)
- *
- * Returns TRUE if "Sync Now" was pressed, FALSE otherwise.
- * ========================================================================= */
-
-BOOL window_handle_events(SyncConfig *cfg, SyncStatus *st)
-{
-    struct IntuiMessage *msg;
-    BOOL sync_requested = FALSE;
-
-    (void)st;  /* status is updated via window_update_status */
-
-    if (!win)
-        return FALSE;
-
-    while ((msg = GT_GetIMsg(win->UserPort))) {
-        ULONG class = msg->Class;
-        UWORD code  = msg->Code;
-        struct Gadget *gad = (struct Gadget *)msg->IAddress;
-
-        GT_ReplyIMsg(msg);
-
-        switch (class) {
-            case IDCMP_CLOSEWINDOW:
-                window_close();
-                return sync_requested;  /* Window is gone -- stop processing */
-
-            case IDCMP_REFRESHWINDOW:
-                GT_BeginRefresh(win);
-                GT_EndRefresh(win, TRUE);
-                break;
-
-            case IDCMP_GADGETUP:
-                switch (gad->GadgetID) {
-                    case GID_SYNC:
-                        sync_requested = TRUE;
-                        break;
-
-                    case GID_SAVE: {
-                        /* Read current gadget values and push into config */
-                        char *srv;
-                        LONG intv;
-
-                        srv  = ((struct StringInfo *)gad_server->SpecialInfo)->Buffer;
-                        intv = ((struct StringInfo *)gad_interval->SpecialInfo)->LongInt;
-
-                        config_set_server(srv);
-                        config_set_interval(intv);
-                        /* Set timezone from current city selection */
-                        if (current_city_count > 0 && current_city_idx < current_city_count) {
-                            config_set_tz_name(current_cities[current_city_idx]->name);
-                        }
-                        config_save();
-                        config_changed = TRUE;
-
-                        /* cfg already points to the static config struct
-                         * returned by config_get(), so it's already updated.
-                         * No copy needed.
-                         */
-                        (void)cfg;
-                        break;
-                    }
-
-                    case GID_HIDE:
-                        window_close();
-                        return sync_requested;
-
-                    case GID_REGION: {
-                        const char **regions = tz_get_regions(NULL);
-                        current_region_idx = code;
-                        /* Detach list before modification */
-                        GT_SetGadgetAttrs(gad_city, win, NULL,
-                            GTLV_Labels, (ULONG)~0,
-                            TAG_DONE);
-                        build_city_list(regions[current_region_idx]);
-                        current_city_idx = 0;
-                        GT_SetGadgetAttrs(gad_city, win, NULL,
-                            GTLV_Labels, (ULONG)&city_list_header,
-                            GTLV_Selected, 0,
-                            TAG_DONE);
-                        if (current_city_count > 0) {
-                            format_tz_info(current_cities[0]);
-                            GT_SetGadgetAttrs(gad_tz_info, win, NULL,
-                                GTTX_Text, (ULONG)tz_info_buf, TAG_DONE);
-                        }
-                        break;
-                    }
-
-                    case GID_CITY:
-                        if (code < current_city_count) {
-                            current_city_idx = code;
-                            format_tz_info(current_cities[code]);
-                            GT_SetGadgetAttrs(gad_tz_info, win, NULL,
-                                GTTX_Text, (ULONG)tz_info_buf, TAG_DONE);
-                        }
-                        break;
-                }
-                break;
-        }
-    }
-
-    return sync_requested;
 }
 
 /* =========================================================================
@@ -615,7 +578,223 @@ ULONG window_signal(void)
 }
 
 /* =========================================================================
- * window_update_status -- refresh the three read-only text gadgets
+ * Helper: toggle_log_panel -- show or hide the log panel
+ * ========================================================================= */
+
+static void toggle_log_panel(void)
+{
+    if (!window_obj || !layout_root)
+        return;
+
+    if (!log_visible) {
+        /* Create log listbrowser */
+        gad_log = NewObject(LISTBROWSER_GetClass(), NULL,
+            GA_ID, GID_LOG,
+            GA_ReadOnly, TRUE,
+            LISTBROWSER_Labels, (ULONG)&log_browser_list,
+            LISTBROWSER_AutoFit, TRUE,
+            LISTBROWSER_VertSeparators, FALSE,
+            TAG_DONE);
+
+        if (!gad_log)
+            return;
+
+        /* Create log panel */
+        layout_log = NewObject(LAYOUT_GetClass(), NULL,
+            LAYOUT_Orientation, LAYOUT_ORIENT_VERT,
+            LAYOUT_BevelStyle, BVS_GROUP,
+            LAYOUT_Label, (ULONG)"Log",
+            LAYOUT_SpaceOuter, TRUE,
+            LAYOUT_AddChild, (ULONG)gad_log,
+            CHILD_MinHeight, 100,
+            TAG_DONE);
+
+        if (layout_log) {
+            SetGadgetAttrs((struct Gadget *)layout_root, win, NULL,
+                LAYOUT_AddChild, (ULONG)layout_log,
+                TAG_DONE);
+
+            /* Update button text */
+            SetGadgetAttrs((struct Gadget *)gad_log_toggle, win, NULL,
+                GA_Text, (ULONG)"Hide Log",
+                TAG_DONE);
+
+            /* Refresh window layout */
+            RethinkLayout((struct Gadget *)layout_root, win, NULL, TRUE);
+
+            log_visible = TRUE;
+        } else {
+            DisposeObject(gad_log);
+            gad_log = NULL;
+        }
+    } else {
+        /* Remove log panel */
+        if (layout_log) {
+            SetGadgetAttrs((struct Gadget *)layout_root, win, NULL,
+                LAYOUT_RemoveChild, (ULONG)layout_log,
+                TAG_DONE);
+
+            DisposeObject(layout_log);
+            layout_log = NULL;
+            gad_log = NULL;
+
+            /* Update button text */
+            SetGadgetAttrs((struct Gadget *)gad_log_toggle, win, NULL,
+                GA_Text, (ULONG)"Show Log",
+                TAG_DONE);
+
+            /* Refresh window layout */
+            RethinkLayout((struct Gadget *)layout_root, win, NULL, TRUE);
+
+            log_visible = FALSE;
+        }
+    }
+}
+
+/* =========================================================================
+ * Helper: handle_region_change -- rebuild city list when region changes
+ * ========================================================================= */
+
+static void handle_region_change(ULONG new_region)
+{
+    const char **regions;
+    ULONG region_count;
+
+    regions = tz_get_regions(&region_count);
+    if (new_region >= region_count)
+        return;
+
+    current_region_idx = new_region;
+
+    /* Detach list from gadget before modifying */
+    SetGadgetAttrs((struct Gadget *)gad_city, win, NULL,
+        LISTBROWSER_Labels, ~0,
+        TAG_DONE);
+
+    /* Rebuild city list */
+    build_city_browser_list(regions[new_region]);
+    current_city_idx = 0;
+
+    /* Reattach list */
+    SetGadgetAttrs((struct Gadget *)gad_city, win, NULL,
+        LISTBROWSER_Labels, (ULONG)&city_browser_list,
+        LISTBROWSER_Selected, 0,
+        TAG_DONE);
+
+    /* Update TZ info */
+    if (current_city_count > 0) {
+        format_tz_info(current_cities[0]);
+        SetGadgetAttrs((struct Gadget *)gad_tz_info, win, NULL,
+            STRINGA_TextVal, (ULONG)tz_info_buf,
+            TAG_DONE);
+    }
+}
+
+/* =========================================================================
+ * Helper: handle_city_change -- update TZ info when city changes
+ * ========================================================================= */
+
+static void handle_city_change(ULONG new_city)
+{
+    if (new_city >= current_city_count)
+        return;
+
+    current_city_idx = new_city;
+    format_tz_info(current_cities[new_city]);
+    SetGadgetAttrs((struct Gadget *)gad_tz_info, win, NULL,
+        STRINGA_TextVal, (ULONG)tz_info_buf,
+        TAG_DONE);
+}
+
+/* =========================================================================
+ * Helper: save_config_from_gadgets -- read gadget values and save config
+ * ========================================================================= */
+
+static void save_config_from_gadgets(void)
+{
+    STRPTR server_str = NULL;
+    LONG interval_val = 0;
+
+    /* Get server string */
+    GetAttr(STRINGA_TextVal, gad_server, (ULONG *)&server_str);
+    if (server_str) {
+        config_set_server(server_str);
+    }
+
+    /* Get interval */
+    GetAttr(INTEGER_Number, gad_interval, (ULONG *)&interval_val);
+    config_set_interval(interval_val);
+
+    /* Set timezone from current city selection */
+    if (current_city_count > 0 && current_city_idx < current_city_count) {
+        config_set_tz_name(current_cities[current_city_idx]->name);
+    }
+
+    config_save();
+}
+
+/* =========================================================================
+ * window_handle_events -- process all pending Reaction messages
+ *
+ * cfg: pointer to live config struct (updated on Save)
+ * st:  pointer to sync status (currently unused here, reserved for future)
+ *
+ * Returns TRUE if "Sync Now" was pressed, FALSE otherwise.
+ * ========================================================================= */
+
+BOOL window_handle_events(SyncConfig *cfg, SyncStatus *st)
+{
+    ULONG result;
+    UWORD code;
+    BOOL sync_requested = FALSE;
+
+    (void)cfg;  /* Config is accessed via config_get() */
+    (void)st;   /* Status is updated via window_update_status */
+
+    if (!window_obj || !win)
+        return FALSE;
+
+    while ((result = DoMethod(window_obj, WM_HANDLEINPUT, &code)) != WMHI_LASTMSG) {
+        switch (result & WMHI_CLASSMASK) {
+            case WMHI_CLOSEWINDOW:
+                window_close();
+                return sync_requested;
+
+            case WMHI_GADGETUP:
+                switch (result & WMHI_GADGETMASK) {
+                    case GID_SYNC:
+                        sync_requested = TRUE;
+                        break;
+
+                    case GID_SAVE:
+                        save_config_from_gadgets();
+                        break;
+
+                    case GID_HIDE:
+                        window_close();
+                        return sync_requested;
+
+                    case GID_LOG_TOGGLE:
+                        toggle_log_panel();
+                        break;
+
+                    case GID_REGION:
+                        handle_region_change(code);
+                        break;
+
+                    case GID_CITY:
+                        handle_city_change(code);
+                        break;
+                }
+                break;
+        }
+    }
+
+    return sync_requested;
+}
+
+/* =========================================================================
+ * window_update_status -- refresh the status display gadgets
  * ========================================================================= */
 
 void window_update_status(SyncStatus *st)
@@ -623,12 +802,24 @@ void window_update_status(SyncStatus *st)
     if (!win)
         return;
 
-    GT_SetGadgetAttrs(gad_status, win, NULL,
-        GTTX_Text, (ULONG)st->status_text, TAG_DONE);
-    GT_SetGadgetAttrs(gad_last_sync, win, NULL,
-        GTTX_Text, (ULONG)st->last_sync_text, TAG_DONE);
-    GT_SetGadgetAttrs(gad_next_sync, win, NULL,
-        GTTX_Text, (ULONG)st->next_sync_text, TAG_DONE);
+    /* Copy to static buffers */
+    strcpy(status_buf, st->status_text);
+    strcpy(last_sync_buf, st->last_sync_text);
+    strcpy(next_sync_buf, st->next_sync_text);
+
+    /* Update gadgets */
+    if (gad_status) {
+        SetGadgetAttrs((struct Gadget *)gad_status, win, NULL,
+            STRINGA_TextVal, (ULONG)status_buf, TAG_DONE);
+    }
+    if (gad_last_sync) {
+        SetGadgetAttrs((struct Gadget *)gad_last_sync, win, NULL,
+            STRINGA_TextVal, (ULONG)last_sync_buf, TAG_DONE);
+    }
+    if (gad_next_sync) {
+        SetGadgetAttrs((struct Gadget *)gad_next_sync, win, NULL,
+            STRINGA_TextVal, (ULONG)next_sync_buf, TAG_DONE);
+    }
 }
 
 /* =========================================================================
@@ -637,44 +828,56 @@ void window_update_status(SyncStatus *st)
 
 void window_log(const char *message)
 {
-    struct LogNode *node;
-    LONG i;
+    struct Node *node;
+    char *text_copy;
+    LONG i, len;
 
     /* Initialize log list if needed (may be called before window_open) */
     init_log_list();
 
-    /* Get next slot (circular buffer) */
-    node = &log_nodes[log_next_slot];
+    /* Calculate message length */
+    for (len = 0; message[len] != '\0' && len < LOG_LINE_LEN - 1; len++)
+        ;
 
-    /* If this node is already in the list, remove it */
-    if (node->node.ln_Succ != NULL && node->node.ln_Pred != NULL) {
-        Remove(&node->node);
+    /* Allocate text copy (node will own this memory) */
+    text_copy = AllocVec(len + 1, MEMF_ANY);
+    if (!text_copy)
+        return;
+
+    for (i = 0; i < len; i++)
+        text_copy[i] = message[i];
+    text_copy[len] = '\0';
+
+    /* Create listbrowser node */
+    node = AllocListBrowserNode(1,
+        LBNA_Column, 0,
+        LBNCA_CopyText, TRUE,
+        LBNCA_Text, (ULONG)text_copy,
+        TAG_DONE);
+
+    FreeVec(text_copy);  /* Node made a copy */
+
+    if (!node)
+        return;
+
+    /* If we're at max entries, remove oldest */
+    if (log_count >= LOG_MAX_ENTRIES) {
+        struct Node *old = RemHead(&log_browser_list);
+        if (old) {
+            FreeListBrowserNode(old);
+            log_count--;
+        }
     }
-
-    /* Copy message text */
-    for (i = 0; i < LOG_LINE_LEN - 1 && message[i] != '\0'; i++) {
-        node->text[i] = message[i];
-    }
-    node->text[i] = '\0';
-
-    /* Set up node */
-    node->node.ln_Name = node->text;
-    node->node.ln_Type = 0;
-    node->node.ln_Pri = 0;
 
     /* Add to end of list */
-    AddTail(&log_list, &node->node);
+    AddTail(&log_browser_list, node);
+    log_count++;
 
-    /* Advance slot */
-    log_next_slot = (log_next_slot + 1) % LOG_MAX_ENTRIES;
-    if (log_count < LOG_MAX_ENTRIES)
-        log_count++;
-
-    /* Update listview if window is open */
-    if (win && gad_log) {
-        GT_SetGadgetAttrs(gad_log, win, NULL,
-            GTLV_Labels, (ULONG)&log_list,
-            GTLV_Top, log_count > 5 ? log_count - 5 : 0,  /* Auto-scroll to bottom */
+    /* Update listbrowser if visible */
+    if (win && gad_log && log_visible) {
+        SetGadgetAttrs((struct Gadget *)gad_log, win, NULL,
+            LISTBROWSER_Labels, (ULONG)&log_browser_list,
+            LISTBROWSER_MakeVisible, log_count - 1,  /* Auto-scroll to bottom */
             TAG_DONE);
     }
 }
