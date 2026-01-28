@@ -1,17 +1,29 @@
 # SyncTime
 
-An AmigaOS 3.0+ commodity that synchronizes the system clock via SNTP (Simple Network Time Protocol).
+An AmigaOS 3.2+ commodity that synchronizes the system clock via SNTP (Simple Network Time Protocol) with full timezone and DST support.
+
+## Features
+
+- SNTP time synchronization from configurable NTP servers
+- Full IANA timezone database with 400+ locations
+- Region/city timezone picker with automatic DST handling
+- Sets TZ and TZONE environment variables (POSIX format)
+- Reaction-based GUI for easy configuration
+- Scrollable activity log in separate window
+- Standard commodity with Exchange integration
+- Configurable sync interval (minimum 15 minutes)
+- Automatic retry on network failures
 
 ## Requirements
 
-- AmigaOS 3.0 (Kickstart 39) or later
+- AmigaOS 3.2 or later (required for Reaction GUI)
 - A TCP/IP stack with bsdsocket.library (Roadshow, AmiTCP, Miami, etc.)
 - Network connectivity to an NTP server
 
 ## Installation
 
 1. Copy `SyncTime` to your `SYS:WBStartup/` or `SYS:Tools/Commodities/` drawer
-2. Optionally add an icon with tooltypes (see below)
+2. Optionally copy `SyncTime.info` for icon with tooltypes
 3. Run SyncTime or reboot if placed in WBStartup
 
 ## Configuration
@@ -21,10 +33,7 @@ Configuration is stored in `ENV:SyncTime.prefs` and `ENVARC:SyncTime.prefs`.
 Default settings:
 - Server: `pool.ntp.org`
 - Interval: `3600` seconds (1 hour)
-- Timezone: `-8` (UTC-8, Pacific Time)
-- DST: Enabled
-
-You can modify settings via the configuration window (accessible through Exchange or the hotkey).
+- Timezone: `America/Los_Angeles`
 
 ## Tooltypes
 
@@ -32,17 +41,9 @@ SyncTime supports the standard Commodities Exchange tooltypes:
 
 | Tooltype | Default | Description |
 |----------|---------|-------------|
-| `CX_PRIORITY` | `0` | Commodity priority (-128 to 127). Higher priority commodities receive input events first. |
-| `CX_POPUP` | `NO` | Open configuration window on startup. Set to `YES` to show window immediately. |
-| `CX_POPKEY` | `ctrl alt t` | Hotkey to toggle the configuration window. |
-
-### Example Icon Tooltypes
-
-```
-CX_PRIORITY=0
-CX_POPUP=NO
-CX_POPKEY=ctrl alt t
-```
+| `CX_PRIORITY` | `0` | Commodity priority (-128 to 127) |
+| `CX_POPUP` | `NO` | Open configuration window on startup |
+| `CX_POPKEY` | `ctrl alt s` | Hotkey to toggle the configuration window |
 
 ### Hotkey Format
 
@@ -51,9 +52,8 @@ The `CX_POPKEY` uses standard Commodities hotkey syntax:
 - Keys: Any key name (`a`-`z`, `0`-`9`, `f1`-`f10`, `help`, `del`, etc.)
 
 Examples:
-- `ctrl alt t` - Control + Alt + T
+- `ctrl alt s` - Control + Alt + S
 - `lcommand help` - Left Amiga + Help
-- `ctrl shift s` - Control + Shift + S
 
 ## Usage
 
@@ -67,7 +67,7 @@ Double-click the SyncTime icon. The commodity will start in the background and p
 SyncTime
 ```
 
-To run with tooltypes from CLI, you can use:
+To run with tooltypes from CLI:
 ```
 SyncTime CX_POPUP=YES
 ```
@@ -75,31 +75,45 @@ SyncTime CX_POPUP=YES
 ### Exchange Control
 
 Once running, SyncTime appears in the Commodities Exchange:
-- **Show**: Opens the configuration window
-- **Hide**: Closes the configuration window
+- **Show Interface**: Opens the configuration window
+- **Hide Interface**: Closes the configuration window
 - **Remove**: Quits SyncTime
 
 ### Configuration Window
 
 The window displays:
+
+**Status Section:**
 - **Status**: Current sync state (Idle, Syncing, Synchronized, or error messages)
 - **Last sync**: Time of the last successful synchronization
 - **Next sync**: Scheduled time for the next sync
 
-Editable settings:
-- **Server**: NTP server hostname
-- **Interval**: Seconds between sync attempts (60-86400)
-- **Timezone**: UTC offset (-12 to +14)
-- **DST**: Daylight Saving Time adjustment (+1 hour when enabled)
+**Settings Section:**
+- **Server**: NTP server hostname (default: pool.ntp.org)
+- **Interval**: Seconds between sync attempts (900-86400)
 
-Buttons:
+**Timezone Section:**
+- **Region**: Geographic region (America, Europe, Asia, etc.)
+- **City**: City within the selected region
+- **Info**: Shows UTC offset and DST status for selected timezone
+
+**Buttons:**
 - **Sync Now**: Immediately perform a time synchronization
-- **Save**: Apply changes and write to ENV:/ENVARC:
+- **Save**: Apply changes and save to ENVARC:
+- **Show Log / Hide Log**: Toggle the activity log window
 - **Hide**: Close the configuration window
+
+### Environment Variables
+
+When you save configuration or on startup, SyncTime sets:
+- **TZ**: POSIX-format timezone string (e.g., `UTC8DST7,M3.2.0,M11.1.0`)
+- **TZONE**: Full IANA timezone name (e.g., `America/Los_Angeles`)
+
+These variables are set globally and can be used by other timezone-aware applications.
 
 ### Retry Behavior
 
-SyncTime syncs immediately on startup. If the sync fails (network unavailable, DNS error, etc.), it will automatically retry every 30 seconds until successful. Once a sync succeeds, it switches to the configured interval (default: 1 hour).
+SyncTime syncs immediately on startup. If the sync fails (network unavailable, DNS error, etc.), it will automatically retry every 30 seconds until successful. Once a sync succeeds, it switches to the configured interval.
 
 ## Signals
 
@@ -124,13 +138,9 @@ SyncTime syncs immediately on startup. If the sync fails (network unavailable, D
 - The server sent an invalid NTP packet
 - Try a different NTP server
 
-### "Clock set failed"
-- This shouldn't happen under normal circumstances
-- Check that timer.device is functioning
-
 ## Building from Source
 
-Requires the m68k-amigaos-gcc cross-compiler.
+Requires the m68k-amigaos-gcc cross-compiler and Python 3 for timezone table generation.
 
 ```
 make clean
@@ -141,8 +151,12 @@ The binary will be created as `SyncTime` in the project root.
 
 ## License
 
-This software is provided as-is for the Amiga community.
+This software is released under the MIT License. See LICENSE file for details.
+
+## Author
+
+Nathan Ollerenshaw <chrome@stupendous.net>
 
 ## Version
 
-See the embedded version string: `$VER: SyncTime 1.0.0`
+1.0.0 - Initial release with IANA timezone database and Reaction GUI
