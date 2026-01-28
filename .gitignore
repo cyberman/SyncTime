@@ -2,3 +2,4 @@
 SyncTime
 SyncTime.map
 src/tz_table.c
+tzdata/

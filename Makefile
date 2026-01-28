@@ -17,18 +17,36 @@ LDFLAGS  = -noixemul
 INCLUDES = -Iinclude
 LIBS     = -lamiga
 
+# Timezone database
+TZDB_VERSION = 2025c
+TZDB_URL = https://data.iana.org/time-zones/releases/tzdata$(TZDB_VERSION).tar.gz
+TZDB_DIR = tzdata
+
 SRCDIR = src
 SRCS   = $(SRCDIR)/main.c \
          $(SRCDIR)/config.c \
          $(SRCDIR)/network.c \
          $(SRCDIR)/sntp.c \
          $(SRCDIR)/clock.c \
-         $(SRCDIR)/window.c
+         $(SRCDIR)/window.c \
+         $(SRCDIR)/tz.c \
+         $(SRCDIR)/tz_table.c
 
 OBJS = $(SRCS:.c=.o)
 OUT  = SyncTime
 
-.PHONY: all clean
+.PHONY: all clean clean-generated
+
+# Download and extract tzdb
+$(TZDB_DIR)/.downloaded:
+	@echo "Downloading tzdata $(TZDB_VERSION)..."
+	mkdir -p $(TZDB_DIR)
+	curl -sfL $(TZDB_URL) | tar xz -C $(TZDB_DIR) && touch $@
+
+# Generate timezone table
+$(SRCDIR)/tz_table.c: $(TZDB_DIR)/.downloaded scripts/gen_tz_table.py
+	@echo "Generating timezone table..."
+	python3 scripts/gen_tz_table.py $(TZDB_DIR) > $@.tmp && mv $@.tmp $@
 
 all: $(OUT)
 
@@ -38,5 +56,9 @@ $(OUT): $(OBJS)
 $(SRCDIR)/%.o: $(SRCDIR)/%.c include/synctime.h
 	$(CC) $(CFLAGS) $(INCLUDES) -c -o $@ $<
 
-clean:
+clean-generated:
+	rm -f $(SRCDIR)/tz_table.c
+	rm -rf $(TZDB_DIR)
+
+clean: clean-generated
 	rm -f $(OBJS) $(OUT)
