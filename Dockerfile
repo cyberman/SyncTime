@@ -20,7 +20,6 @@ RUN pacman -Syu --noconfirm && \
         flex \
         gettext \
         gperf \
-        p7zip \
         ncurses \
         rsync \
         texinfo \
@@ -41,8 +40,15 @@ RUN git clone https://aur.archlinux.org/m68k-amigaos-gcc.git && \
     sed -i 's/> *\/dev\/null//g; s/2>&1//g' PKGBUILD && \
     makepkg -si --noconfirm
 
+# Install lha from AUR (patch to compile with modern GCC)
+RUN cd /home/builder && \
+    git clone https://aur.archlinux.org/lha.git && \
+    cd lha && \
+    sed -i 's/CFLAGS+=" /CFLAGS+=" -std=gnu89 -Wno-error /g' PKGBUILD && \
+    makepkg -si --noconfirm
+
 # Clean up build files to reduce image size
-RUN rm -rf /home/builder/m68k-amigaos-gcc
+RUN rm -rf /home/builder/m68k-amigaos-gcc /home/builder/lha
 
 # Switch back to root for final setup
 USER root
