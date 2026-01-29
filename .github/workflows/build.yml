@@ -72,7 +72,6 @@ jobs:
 
       - name: Find compiler and build SyncTime
         run: |
-          set -x  # Enable debug output
           # Find where the cross-compiler is installed
           COMPILER=$(which m68k-amigaos-gcc 2>/dev/null || find /opt /usr -name "m68k-amigaos-gcc" -type f 2>/dev/null | head -1)
           if [ -z "$COMPILER" ]; then
@@ -83,26 +82,8 @@ jobs:
           echo "Using PREFIX=$PREFIX"
           echo "Compiler version:"
           $COMPILER --version
-          echo "Python version:"
-          python3 --version || python --version
           make clean || true
-          # Download tzdata first and verify
-          make tzdata/.downloaded
-          echo "tzdata contents:"
-          ls -la tzdata/
-          # Generate tz_table.c manually to see errors
-          echo "Generating timezone table..."
-          python3 scripts/gen_tz_table.py tzdata > src/tz_table.c.tmp && mv src/tz_table.c.tmp src/tz_table.c
-          echo "Generated tz_table.c:"
-          head -20 src/tz_table.c
-          # Now build
-          make PREFIX=$PREFIX V=1
-          # Verify the binary was built
-          if [ ! -f SyncTime ]; then
-            echo "Error: SyncTime binary was not created"
-            ls -la
-            exit 1
-          fi
+          make PREFIX=$PREFIX
           echo "Build successful:"
           ls -la SyncTime
           file SyncTime

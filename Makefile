@@ -37,6 +37,8 @@ OUT  = SyncTime
 
 .PHONY: all clean clean-generated
 
+all: $(OUT)
+
 # Download and extract tzdb
 $(TZDB_DIR)/.downloaded:
 	@echo "Downloading tzdata $(TZDB_VERSION)..."
@@ -47,8 +49,6 @@ $(TZDB_DIR)/.downloaded:
 $(SRCDIR)/tz_table.c: $(TZDB_DIR)/.downloaded scripts/gen_tz_table.py
 	@echo "Generating timezone table..."
 	python3 scripts/gen_tz_table.py $(TZDB_DIR) 2>/dev/null > $@.tmp && mv $@.tmp $@
-
-all: $(OUT)
 
 $(OUT): $(OBJS)
 	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(LIBS)
