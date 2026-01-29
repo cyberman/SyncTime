@@ -10,7 +10,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}-build
+  IMAGE_NAME: ${{ github.repository_owner }}/synctime-build
 
 jobs:
   build-image:
@@ -61,7 +61,7 @@ jobs:
       packages: read
 
     container:
-      image: ghcr.io/${{ github.repository }}-build:latest
+      image: ghcr.io/${{ github.repository_owner }}/synctime-build:latest
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -83,11 +83,27 @@ jobs:
           make clean || true
           make PREFIX=$PREFIX
 
+      - name: Create Aminet LHA archive
+        run: |
+          VERSION=$(cat version.txt | tr -d '\n')
+          # Update version in readme
+          sed -i "s/^Version:.*/Version:      $VERSION/" SyncTime.readme
+          # Create archive directory structure
+          mkdir -p SyncTime
+          cp SyncTime SyncTime/
+          cp SyncTime.info SyncTime/
+          cp README.md SyncTime/
+          cp LICENSE SyncTime/
+          # Create LHA archive
+          lha c SyncTime.lha SyncTime/
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: SyncTime
           path: |
+            SyncTime.lha
+            SyncTime.readme
             SyncTime
             SyncTime.info
           retention-days: 30
@@ -109,6 +125,6 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            SyncTime
-            SyncTime.info
+            SyncTime.lha
+            SyncTime.readme
           generate_release_notes: true
