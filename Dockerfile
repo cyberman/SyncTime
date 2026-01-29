@@ -34,8 +34,10 @@ USER builder
 WORKDIR /home/builder
 
 # Clone and build the m68k-amigaos-gcc AUR package
+# Modify PKGBUILD to show verbose output (remove output redirections)
 RUN git clone https://aur.archlinux.org/m68k-amigaos-gcc.git && \
     cd m68k-amigaos-gcc && \
+    sed -i 's/> *\/dev\/null//g; s/2>&1//g' PKGBUILD && \
     makepkg -si --noconfirm
 
 # Install lha from AUR (creates LHA archives)
