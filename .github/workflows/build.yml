@@ -83,7 +83,19 @@ jobs:
           echo "Using PREFIX=$PREFIX"
           echo "Compiler version:"
           $COMPILER --version
+          echo "Python version:"
+          python3 --version || python --version
           make clean || true
+          # Download tzdata first and verify
+          make tzdata/.downloaded
+          echo "tzdata contents:"
+          ls -la tzdata/
+          # Generate tz_table.c manually to see errors
+          echo "Generating timezone table..."
+          python3 scripts/gen_tz_table.py tzdata > src/tz_table.c.tmp && mv src/tz_table.c.tmp src/tz_table.c
+          echo "Generated tz_table.c:"
+          head -20 src/tz_table.c
+          # Now build
           make PREFIX=$PREFIX V=1
           # Verify the binary was built
           if [ ! -f SyncTime ]; then
