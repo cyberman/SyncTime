@@ -72,6 +72,7 @@ jobs:
 
       - name: Find compiler and build SyncTime
         run: |
+          set -x  # Enable debug output
           # Find where the cross-compiler is installed
           COMPILER=$(which m68k-amigaos-gcc 2>/dev/null || find /opt /usr -name "m68k-amigaos-gcc" -type f 2>/dev/null | head -1)
           if [ -z "$COMPILER" ]; then
@@ -80,8 +81,19 @@ jobs:
           fi
           PREFIX=$(dirname $(dirname $COMPILER))
           echo "Using PREFIX=$PREFIX"
+          echo "Compiler version:"
+          $COMPILER --version
           make clean || true
-          make PREFIX=$PREFIX
+          make PREFIX=$PREFIX V=1
+          # Verify the binary was built
+          if [ ! -f SyncTime ]; then
+            echo "Error: SyncTime binary was not created"
+            ls -la
+            exit 1
+          fi
+          echo "Build successful:"
+          ls -la SyncTime
+          file SyncTime
 
       - name: Create Aminet LHA archive
         run: |
