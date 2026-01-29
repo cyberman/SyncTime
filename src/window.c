@@ -65,6 +65,7 @@
  * Static module state - Main window
  * ========================================================================= */
 
+static struct Screen *pub_screen = NULL;  /* Locked public screen for font settings */
 static Object *window_obj = NULL;
 static struct Window *win = NULL;
 
@@ -333,6 +334,7 @@ static void log_window_open(void)
     /* Create log window - positioned beneath main config window */
     log_window_obj = NewObject(WINDOW_GetClass(), NULL,
         WA_Title, (ULONG)"SyncTime Log",
+        WA_PubScreen, (ULONG)pub_screen,
         WA_Left, log_left,
         WA_Top, log_top,
         WA_Width, log_width,
@@ -447,13 +449,20 @@ BOOL window_open(struct Screen *screen)
     Object *status_group, *settings_group, *timezone_group, *button_row;
     Object *row;
 
-    (void)screen;  /* Not used -- we open on default public screen */
-
     /* Initialize log list if needed */
     init_log_list();
 
     if (window_obj)
         return TRUE;   /* Already open */
+
+    /* Lock the public screen for proper font settings */
+    if (screen) {
+        pub_screen = screen;
+    } else {
+        pub_screen = LockPubScreen(NULL);  /* Lock default (Workbench) screen */
+        if (!pub_screen)
+            return FALSE;
+    }
 
     /* Read current config so gadgets reflect live values */
     cfg = config_get();
@@ -643,9 +652,10 @@ BOOL window_open(struct Screen *screen)
     if (!layout_root)
         goto cleanup;
 
-    /* Create window object */
+    /* Create window object on the public screen for proper font settings */
     window_obj = NewObject(WINDOW_GetClass(), NULL,
         WA_Title, (ULONG)"SyncTime",
+        WA_PubScreen, (ULONG)pub_screen,
         WA_DragBar, TRUE,
         WA_CloseGadget, TRUE,
         WA_DepthGadget, TRUE,
@@ -679,6 +689,10 @@ BOOL window_open(struct Screen *screen)
 cleanup:
     if (layout_root) {
         DisposeObject(layout_root);
+    }
+    if (pub_screen) {
+        UnlockPubScreen(NULL, pub_screen);
+        pub_screen = NULL;
     }
     layout_root = NULL;
     gad_status = gad_last_sync = gad_next_sync = NULL;
@@ -730,6 +744,12 @@ void window_close(void)
         city_list_initialized = FALSE;
     }
     /* Note: log list is preserved across window open/close */
+
+    /* Unlock the public screen */
+    if (pub_screen) {
+        UnlockPubScreen(NULL, pub_screen);
+        pub_screen = NULL;
+    }
 
     /* Reset object pointers */
     layout_root = NULL;
