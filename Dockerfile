@@ -1,4 +1,4 @@
-FROM archlinux:latest
+FROM cachyos/cachyos:latest
 
 # Update system and install base dependencies
 RUN pacman -Syu --noconfirm && \
@@ -8,12 +8,12 @@ RUN pacman -Syu --noconfirm && \
         python \
         curl \
         sudo \
+        lha \
         # AUR package build dependencies
         gmp \
         libmpc \
         mpfr \
         readline \
-        zlib \
         autoconf \
         automake \
         bison \
@@ -40,17 +40,14 @@ RUN git clone https://aur.archlinux.org/m68k-amigaos-gcc.git && \
     sed -i 's/> *\/dev\/null//g; s/2>&1//g' PKGBUILD && \
     makepkg -si --noconfirm
 
-# Install lha from AUR (use gnu89 for K&R C compatibility)
-RUN cd /home/builder && \
-    git clone https://aur.archlinux.org/lha.git && \
-    cd lha && \
-    CFLAGS="-std=gnu89 -Wno-error -O2" makepkg -si --noconfirm
-
 # Clean up build files to reduce image size
-RUN rm -rf /home/builder/m68k-amigaos-gcc /home/builder/lha
+RUN rm -rf /home/builder/m68k-amigaos-gcc
 
 # Switch back to root for final setup
 USER root
+
+# Add m68k-amigaos-gcc to PATH
+ENV PATH="/opt/amiga/bin:${PATH}"
 
 # Set up working directory for builds
 WORKDIR /build
