@@ -13,7 +13,7 @@ same thing. And that's fair. Basically, it was an exercise for me to see
 how to do it, and to see if Claude could help me with it. And I also was
 kind of unhappy with the choices; they were either too simple or didn't
 make the configuration easy enough. I wanted it to be a drag and drop thing
-with no magic tooltip configuration, just find your region and it works.
+with no magic tooltype configuration, just find your region and it works.
 
 Please drop me a mail if you end up using this, and like it!
 

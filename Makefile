@@ -65,6 +65,7 @@ $(LICENSE_DEST): LICENSE | dist-setup
 archive: all
 	@echo "Creating SyncTime.lha..."
 	cd dist && lha -c ../SyncTime.lha SyncTime.info SyncTime
+	cp dist/SyncTime/SyncTime.readme SyncTime.readme
 
 # Download and extract tzdb
 $(TZDB_DIR)/.downloaded:
@@ -88,3 +89,4 @@ clean: clean-generated
 	rm -f $(OBJS)
 	rm -rf dist
 	rm -f SyncTime.lha
+	rm -f SyncTime.readme

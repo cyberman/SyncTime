@@ -9,3 +9,4 @@ Disk.info
 __pycache__/
 *.pyc
 tzdb-2025c
+/SyncTime.readme
