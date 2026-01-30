@@ -1,5 +1,5 @@
 *.o
-*.lha
+SyncTime.lha
 /dist/
 src/tz_table.c
 tzdata/

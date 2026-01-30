@@ -63,8 +63,8 @@ $(LICENSE_DEST): LICENSE | dist-setup
 
 # Create lha archive for Aminet
 archive: all
-	@echo "Creating SyncTime-$(VERSION).lha..."
-	cd dist && lha -c ../SyncTime-$(VERSION).lha SyncTime.info SyncTime
+	@echo "Creating SyncTime.lha..."
+	cd dist && lha -c ../SyncTime.lha SyncTime.info SyncTime
 
 # Download and extract tzdb
 $(TZDB_DIR)/.downloaded:
@@ -87,4 +87,4 @@ clean-generated:
 clean: clean-generated
 	rm -f $(OBJS)
 	rm -rf dist
-	rm -f SyncTime-*.lha
+	rm -f SyncTime.lha

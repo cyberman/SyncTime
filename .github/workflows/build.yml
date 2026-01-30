@@ -94,7 +94,7 @@ jobs:
         with:
           name: SyncTime
           path: |
-            SyncTime-*.lha
+            SyncTime.lha
             dist/SyncTime/SyncTime.readme
           retention-days: 30
 
@@ -115,6 +115,6 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            SyncTime-*.lha
+            SyncTime.lha
             **/SyncTime.readme
           generate_release_notes: true
