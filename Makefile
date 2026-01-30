@@ -35,9 +35,28 @@ SRCS   = $(SRCDIR)/main.c \
 OBJS = $(SRCS:.c=.o)
 OUT  = SyncTime
 
-.PHONY: all clean clean-generated
+.PHONY: all clean clean-generated dist archive
 
-all: $(OUT)
+all: $(OUT) SyncTime.readme
+
+# Build dist folder from dist-src template
+dist: $(OUT) SyncTime.readme
+	@echo "Building dist folder..."
+	rm -rf dist
+	cp -r dist-src dist
+	cp $(OUT) dist/SyncTime/SyncTime
+	cp SyncTime.readme dist/SyncTime/SyncTime.readme
+	cp LICENSE dist/SyncTime/LICENSE
+
+# Create lha archive for Aminet
+archive: dist
+	@echo "Creating SyncTime-$(VERSION).lha..."
+	cd dist && lha -c ../SyncTime-$(VERSION).lha SyncTime.info SyncTime
+
+# Generate Aminet readme from README.md
+SyncTime.readme: README.md scripts/gen_readme.py version.txt
+	@echo "Generating SyncTime.readme..."
+	python3 scripts/gen_readme.py README.md $(VERSION) > $@
 
 # Download and extract tzdb
 $(TZDB_DIR)/.downloaded:
@@ -61,4 +80,6 @@ clean-generated:
 	rm -rf $(TZDB_DIR)
 
 clean: clean-generated
-	rm -f $(OBJS) $(OUT)
+	rm -f $(OBJS) $(OUT) SyncTime.readme
+	rm -rf dist
+	rm -f SyncTime-*.lha

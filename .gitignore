@@ -1,6 +1,9 @@
 *.o
-SyncTime
-SyncTime.map
+*.lha
+/SyncTime
+/SyncTime.readme
+/SyncTime.map
+/dist/
 src/tz_table.c
 tzdata/
 *.uaem
