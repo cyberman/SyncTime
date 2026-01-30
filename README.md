@@ -2,6 +2,12 @@
 
 An AmigaOS 3.2+ commodity that synchronizes the system clock via SNTP with full timezone and DST support.
 
+## Description
+
+SyncTime is a commodity that synchronizes your Amiga's clock with internet
+time servers using the SNTP protocol. It features a Reaction-based GUI for
+configuration and includes a comprehensive timezone database.
+
 ## Features
 
 - SNTP time synchronization from configurable NTP servers
@@ -21,15 +27,17 @@ An AmigaOS 3.2+ commodity that synchronizes the system clock via SNTP with full 
 
 ## Installation
 
-Copy `SyncTime` to `SYS:WBStartup/` or `SYS:Tools/Commodities/`.
+Copy SyncTime to SYS:WBStartup/ or SYS:Tools/Commodities/.
 
-Configuration is stored in `ENVARC:SyncTime.prefs`.
+Configuration is stored in ENVARC:SyncTime.prefs.
 
 ## Usage
 
-SyncTime runs as a standard Amiga commodity. Use Exchange to show/hide the window, or press the hotkey (default: `ctrl alt s`).
+SyncTime runs as a standard Amiga commodity. Use Exchange to show/hide
+the window, or press the hotkey (default: ctrl alt s).
 
 From the configuration window you can:
+
 - View sync status and last/next sync times
 - Configure the NTP server (default: pool.ntp.org)
 - Set the sync interval (900-86400 seconds)
@@ -39,18 +47,15 @@ From the configuration window you can:
 
 ## Tooltypes
 
-| Tooltype | Default | Description |
-|----------|---------|-------------|
-| `CX_PRIORITY` | `0` | Commodity priority |
-| `CX_POPUP` | `NO` | Open window on startup |
-| `CX_POPKEY` | `ctrl alt s` | Hotkey to toggle window |
-| `DONOTWAIT` | - | Workbench won't wait for program to exit (recommended for WBStartup) |
+- **CX_PRIORITY=n** - Commodity priority (default: 0)
+- **CX_POPUP=YES|NO** - Open window on startup (default: NO)
+- **CX_POPKEY=key** - Hotkey to toggle window (default: ctrl alt s)
+- **DONOTWAIT** - Workbench won't wait for exit (recommended for WBStartup)
 
-## Environment Variables
+## History
 
-On save/startup, SyncTime sets:
-- **TZ**: POSIX timezone string (e.g., `PST8PDT,M3.2.0,M11.1.0`)
-- **TZONE**: IANA timezone name (e.g., `America/Los_Angeles`)
+- **1.0.1** - Build system improvements
+- **1.0.0** - Initial release with SNTP, Reaction GUI, IANA timezone database
 
 ## Building
 
@@ -67,7 +72,5 @@ MIT License. See LICENSE file.
 ## Author
 
 Nathan Ollerenshaw <chrome@stupendous.net>
-
-## Source
 
 https://github.com/matjam/synctime

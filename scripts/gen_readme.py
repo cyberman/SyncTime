@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Generate SyncTime.readme (Aminet format) from README.md and template header.
+Convert README.md to Aminet readme format.
+Header is hardcoded, content extracted from README.md.
 """
 
 import re
 import sys
-import textwrap
 
-HEADER_TEMPLATE = """\
+HEADER = """\
 Short:        NTP time sync commodity with timezone support
 Author:       Nathan Ollerenshaw <chrome@stupendous.net>
 Uploader:     chrome@stupendous.net
@@ -18,32 +18,6 @@ Requires:     AmigaOS 3.2+, bsdsocket.library, TCP/IP stack
 Distribution: Aminet
 """
 
-HISTORY = """\
-History:
-
-  1.0.1 - Build system improvements
-        - Switched to CachyOS for CI builds
-
-  1.0.0 - Initial release
-        - SNTP synchronization
-        - Reaction GUI with timezone picker
-        - IANA timezone database with DST
-        - TZ/TZONE environment variable support
-"""
-
-def strip_markdown(text):
-    """Convert markdown to plain text."""
-    # Remove code blocks
-    text = re.sub(r'```[^`]*```', '', text, flags=re.DOTALL)
-    # Remove inline code
-    text = re.sub(r'`([^`]+)`', r'\1', text)
-    # Remove bold/italic
-    text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
-    text = re.sub(r'\*([^*]+)\*', r'\1', text)
-    # Remove links, keep text
-    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
-    # Remove markdown tables (we'll handle them specially)
-    return text
 
 def parse_readme(readme_path):
     """Parse README.md into sections."""
@@ -51,122 +25,113 @@ def parse_readme(readme_path):
         content = f.read()
 
     sections = {}
-    current_section = 'intro'
+    current_section = None
     current_content = []
 
     for line in content.split('\n'):
         if line.startswith('## '):
-            if current_content:
+            if current_section and current_content:
                 sections[current_section] = '\n'.join(current_content).strip()
             current_section = line[3:].strip().lower()
             current_content = []
-        elif line.startswith('# '):
-            # Skip main title
-            pass
-        else:
+        elif current_section:
             current_content.append(line)
 
-    if current_content:
+    if current_section and current_content:
         sections[current_section] = '\n'.join(current_content).strip()
 
     return sections
 
-def format_list(text, indent=2):
-    """Format markdown list to indented plain text."""
-    lines = []
-    for line in text.split('\n'):
+
+def strip_markdown(text):
+    """Convert markdown to plain text."""
+    text = re.sub(r'```[^`]*```', '', text, flags=re.DOTALL)
+    text = re.sub(r'`([^`]+)`', r'\1', text)
+    text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
+    text = re.sub(r'\*([^*]+)\*', r'\1', text)
+    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+    return text
+
+
+def format_section(title, content, is_list=False):
+    """Format a section."""
+    lines = [f'{title}:\n']
+    for line in content.split('\n'):
         line = line.strip()
+        if not line or line.startswith('```'):
+            continue
         if line.startswith('- '):
-            lines.append(' ' * indent + '* ' + line[2:])
-        elif line.startswith('| ') and not line.startswith('|--'):
-            # Table row - skip header separator
-            pass
-        elif line:
-            lines.append(' ' * indent + line)
+            text = strip_markdown(line[2:])
+            lines.append(f'  * {text}')
+        else:
+            text = strip_markdown(line)
+            if text:
+                lines.append(f'  {text}')
     return '\n'.join(lines)
 
-def format_section(title, content):
-    """Format a section with title and indented content."""
-    # Strip markdown
-    content = strip_markdown(content)
 
-    # Format lists
-    lines = []
+def format_history(content):
+    """Format history section."""
+    lines = ['History:\n']
     for line in content.split('\n'):
-        line = line.rstrip()
-        if line.startswith('- '):
-            lines.append('  * ' + line[2:])
-        elif line.startswith('|'):
-            # Skip markdown tables
-            continue
-        elif line:
-            lines.append('  ' + line)
+        line = line.strip()
+        if line.startswith('- **'):
+            match = re.match(r'-\s*\*\*(.+?)\*\*\s*-\s*(.+)', line)
+            if match:
+                lines.append(f'  {match.group(1)} - {match.group(2)}')
+    return '\n'.join(lines)
 
-    if not lines:
-        return ''
-
-    return f"{title}:\n\n" + '\n'.join(lines)
 
 def generate_readme(readme_path, version):
     """Generate Aminet-style readme."""
     sections = parse_readme(readme_path)
+    output = [HEADER.format(version=version)]
 
-    output = []
-    output.append(HEADER_TEMPLATE.format(version=version))
+    if 'description' in sections:
+        output.append(strip_markdown(sections['description']))
+        output.append('')
 
-    # Description from intro
-    if 'intro' in sections:
-        desc = strip_markdown(sections['intro']).strip()
-        output.append(desc)
-
-    # Features
     if 'features' in sections:
-        output.append('\n' + format_section('Features', sections['features']))
+        output.append(format_section('Features', sections['features']))
+        output.append('')
 
-    # Installation
     if 'installation' in sections:
-        output.append('\n' + format_section('Installation', sections['installation']))
+        output.append(format_section('Installation', sections['installation']))
+        output.append('')
 
-    # Usage
     if 'usage' in sections:
-        output.append('\n' + format_section('Usage', sections['usage']))
+        output.append(format_section('Usage', sections['usage']))
+        output.append('')
 
-    # Tooltypes
     if 'tooltypes' in sections:
-        output.append('\nTooltypes/CLI Arguments:\n')
-        output.append('  CX_PRIORITY=<n>   Commodity priority (default: 0)')
-        output.append('  CX_POPUP=YES|NO   Open window on startup (default: NO)')
-        output.append('  CX_POPKEY=<key>   Hotkey to toggle window (default: ctrl alt s)')
-        output.append('  DONOTWAIT         Workbench won\'t wait for exit (for WBStartup)')
+        output.append(format_section('Tooltypes', sections['tooltypes']))
+        output.append('')
 
-    # Requirements
     if 'requirements' in sections:
-        output.append('\n' + format_section('Requirements', sections['requirements']))
+        output.append(format_section('Requirements', sections['requirements']))
+        output.append('')
 
-    # Source
-    output.append('\nSource Code:\n')
+    output.append('Source Code:\n')
     output.append('  https://github.com/matjam/synctime')
-
-    # History
-    output.append('\n' + HISTORY)
-
-    # License
-    output.append('License:\n')
-    output.append('  This software is released under the MIT License.')
-
-    # Contact
-    output.append('\nContact:\n')
-    output.append('  Nathan Ollerenshaw <chrome@stupendous.net>')
     output.append('')
 
+    if 'history' in sections:
+        output.append(format_history(sections['history']))
+        output.append('')
+
+    output.append('License:\n')
+    output.append('  MIT License. See LICENSE file.')
+    output.append('')
+
+    output.append('Contact:\n')
+    output.append('  Nathan Ollerenshaw <chrome@stupendous.net>')
+
     return '\n'.join(output)
+
 
 if __name__ == '__main__':
     if len(sys.argv) != 3:
         print(f"Usage: {sys.argv[0]} <README.md> <version>", file=sys.stderr)
         sys.exit(1)
 
-    readme_path = sys.argv[1]
-    version = sys.argv[2]
-
-    print(generate_readme(readme_path, version))
+    print(generate_readme(sys.argv[1], sys.argv[2]))

@@ -1,5 +1,5 @@
 # Makefile for SyncTime - Amiga NTP Clock Synchronizer
-# Usage: make / make clean
+# Usage: make / make clean / make archive
 # Override: make PREFIX=/opt/amiga
 
 PREFIX ?= /opt/amiga
@@ -33,30 +33,38 @@ SRCS   = $(SRCDIR)/main.c \
          $(SRCDIR)/tz_table.c
 
 OBJS = $(SRCS:.c=.o)
-OUT  = SyncTime
 
-.PHONY: all clean clean-generated dist archive
+# Output paths - build directly into dist/
+DISTDIR = dist/SyncTime
+OUT     = $(DISTDIR)/SyncTime
+README  = $(DISTDIR)/SyncTime.readme
+LICENSE_DEST = $(DISTDIR)/LICENSE
 
-all: $(OUT) SyncTime.readme
+.PHONY: all clean clean-generated archive dist-setup
 
-# Build dist folder from dist-src template
-dist: $(OUT) SyncTime.readme
-	@echo "Building dist folder..."
-	rm -rf dist
-	cp -r dist-src dist
-	cp $(OUT) dist/SyncTime/SyncTime
-	cp SyncTime.readme dist/SyncTime/SyncTime.readme
-	cp LICENSE dist/SyncTime/LICENSE
+all: $(OUT) $(README) $(LICENSE_DEST)
 
-# Create lha archive for Aminet
-archive: dist
-	@echo "Creating SyncTime-$(VERSION).lha..."
-	cd dist && lha -c ../SyncTime-$(VERSION).lha SyncTime.info SyncTime
+# Setup dist folder from template (only if needed)
+dist-setup:
+	@if [ ! -d dist ]; then cp -r dist-src dist; fi
 
-# Generate Aminet readme from README.md
-SyncTime.readme: README.md scripts/gen_readme.py version.txt
+# Build binary directly into dist/SyncTime/
+$(OUT): $(OBJS) | dist-setup
+	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(LIBS)
+
+# Generate Aminet readme directly into dist/SyncTime/
+$(README): README.md scripts/gen_readme.py version.txt | dist-setup
 	@echo "Generating SyncTime.readme..."
 	python3 scripts/gen_readme.py README.md $(VERSION) > $@
+
+# Copy LICENSE into dist/SyncTime/
+$(LICENSE_DEST): LICENSE | dist-setup
+	cp LICENSE $@
+
+# Create lha archive for Aminet
+archive: all
+	@echo "Creating SyncTime-$(VERSION).lha..."
+	cd dist && lha -c ../SyncTime-$(VERSION).lha SyncTime.info SyncTime
 
 # Download and extract tzdb
 $(TZDB_DIR)/.downloaded:
@@ -69,9 +77,6 @@ $(SRCDIR)/tz_table.c: $(TZDB_DIR)/.downloaded scripts/gen_tz_table.py
 	@echo "Generating timezone table..."
 	python3 scripts/gen_tz_table.py $(TZDB_DIR) 2>/dev/null > $@.tmp && mv $@.tmp $@
 
-$(OUT): $(OBJS)
-	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(LIBS)
-
 $(SRCDIR)/%.o: $(SRCDIR)/%.c include/synctime.h
 	$(CC) $(CFLAGS) $(INCLUDES) -c -o $@ $<
 
@@ -80,6 +85,6 @@ clean-generated:
 	rm -rf $(TZDB_DIR)
 
 clean: clean-generated
-	rm -f $(OBJS) $(OUT) SyncTime.readme
+	rm -f $(OBJS)
 	rm -rf dist
 	rm -f SyncTime-*.lha
