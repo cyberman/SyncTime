@@ -54,6 +54,7 @@ From the configuration window you can:
 
 ## History
 
+- **1.0.2** - Delay initial sync by 60 seconds to allow network stack to start
 - **1.0.1** - Build system improvements
 - **1.0.0** - Initial release with SNTP, Reaction GUI, IANA timezone database
 
