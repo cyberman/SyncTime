@@ -453,6 +453,7 @@ BOOL window_open(struct Screen *screen)
     Object *row_server = NULL, *row_interval = NULL;
     Object *row_region = NULL;
     Object *city_label = NULL;
+    Object *btn_sync = NULL, *btn_save = NULL, *btn_hide = NULL;
 
     /* Initialize log list if needed */
     init_log_list();
@@ -642,27 +643,37 @@ BOOL window_open(struct Screen *screen)
         GA_Text, (ULONG)"Show Log",
         TAG_DONE);
 
+    /* Create buttons */
+    btn_sync = NewObject(BUTTON_GetClass(), NULL,
+        GA_ID, GID_SYNC,
+        GA_RelVerify, TRUE,
+        GA_Text, (ULONG)"Sync Now",
+        TAG_DONE);
+
+    btn_save = NewObject(BUTTON_GetClass(), NULL,
+        GA_ID, GID_SAVE,
+        GA_RelVerify, TRUE,
+        GA_Text, (ULONG)"Save",
+        TAG_DONE);
+
+    btn_hide = NewObject(BUTTON_GetClass(), NULL,
+        GA_ID, GID_HIDE,
+        GA_RelVerify, TRUE,
+        GA_Text, (ULONG)"Hide",
+        TAG_DONE);
+
+    if (!gad_log_toggle || !btn_sync || !btn_save || !btn_hide)
+        goto cleanup;
+
     /* Create button row */
     button_row = NewObject(LAYOUT_GetClass(), NULL,
         LAYOUT_Orientation, LAYOUT_ORIENT_HORIZ,
         LAYOUT_EvenSize, TRUE,
         LAYOUT_SpaceOuter, TRUE,
-        LAYOUT_AddChild, (ULONG)NewObject(BUTTON_GetClass(), NULL,
-            GA_ID, GID_SYNC,
-            GA_RelVerify, TRUE,
-            GA_Text, (ULONG)"Sync Now",
-            TAG_DONE),
-        LAYOUT_AddChild, (ULONG)NewObject(BUTTON_GetClass(), NULL,
-            GA_ID, GID_SAVE,
-            GA_RelVerify, TRUE,
-            GA_Text, (ULONG)"Save",
-            TAG_DONE),
+        LAYOUT_AddChild, (ULONG)btn_sync,
+        LAYOUT_AddChild, (ULONG)btn_save,
         LAYOUT_AddChild, (ULONG)gad_log_toggle,
-        LAYOUT_AddChild, (ULONG)NewObject(BUTTON_GetClass(), NULL,
-            GA_ID, GID_HIDE,
-            GA_RelVerify, TRUE,
-            GA_Text, (ULONG)"Hide",
-            TAG_DONE),
+        LAYOUT_AddChild, (ULONG)btn_hide,
         TAG_DONE);
 
     if (!button_row)
@@ -736,6 +747,13 @@ cleanup:
         if (row_region) DisposeObject(row_region);
         if (row)        DisposeObject(row);
         if (city_label) DisposeObject(city_label);
+    }
+        if (!button_row) {
+        if (btn_sync) DisposeObject(btn_sync);
+        if (btn_save) DisposeObject(btn_save);
+        if (btn_hide) DisposeObject(btn_hide);
+        if (gad_log_toggle) DisposeObject(gad_log_toggle);
+        gad_log_toggle = NULL;
     }
     if (pub_screen_locked && pub_screen) {
         UnlockPubScreen(NULL, pub_screen);
