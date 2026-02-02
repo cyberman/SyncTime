@@ -270,14 +270,24 @@ static Object *create_display_string(ULONG id, const char *text)
 static Object *create_label_row(const char *label_text, Object *gadget)
 {
     Object *label = create_label(label_text);
-    if (!label) return NULL;
+    Object *row;
 
-    return NewObject(LAYOUT_GetClass(), NULL,
+    if (!label)
+        return NULL;
+
+    row = NewObject(LAYOUT_GetClass(), NULL,
         LAYOUT_Orientation, LAYOUT_ORIENT_HORIZ,
         LAYOUT_AddImage, (ULONG)label,  /* Labels are images, not gadgets */
         CHILD_WeightedWidth, 0,
         LAYOUT_AddChild, (ULONG)gadget,
         TAG_DONE);
+
+    if (!row) {
+        DisposeObject(label); /* Prevent leak if row creation fails */
+        return NULL;
+    }
+
+    return row;
 }
 
 /* =========================================================================
