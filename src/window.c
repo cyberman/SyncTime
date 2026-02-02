@@ -450,6 +450,7 @@ BOOL window_open(struct Screen *screen)
     Object *status_group = NULL, *settings_group = NULL, *timezone_group = NULL, *button_row = NULL;
     Object *row = NULL;
     Object *row_status = NULL, *row_last = NULL, *row_next = NULL;
+    Object *row_server = NULL, *row_interval = NULL;
 
     /* Initialize log list if needed */
     init_log_list();
@@ -553,14 +554,20 @@ BOOL window_open(struct Screen *screen)
     if (!gad_server || !gad_interval)
         goto cleanup;
 
+    row_server   = create_label_row("Server:", gad_server);
+    row_interval = create_label_row("Interval (sec):", gad_interval);
+
+    if (!row_server || !row_interval)
+        goto cleanup;
+
     /* Create settings group */
     settings_group = NewObject(LAYOUT_GetClass(), NULL,
         LAYOUT_Orientation, LAYOUT_ORIENT_VERT,
         LAYOUT_BevelStyle, BVS_GROUP,
         LAYOUT_Label, (ULONG)"Settings",
         LAYOUT_SpaceOuter, TRUE,
-        LAYOUT_AddChild, (ULONG)create_label_row("Server:", gad_server),
-        LAYOUT_AddChild, (ULONG)create_label_row("Interval (sec):", gad_interval),
+        LAYOUT_AddChild, (ULONG)row_server,
+        LAYOUT_AddChild, (ULONG)row_interval,
         TAG_DONE);
 
     if (!settings_group)
@@ -707,6 +714,10 @@ cleanup:
         if (row_status) DisposeObject(row_status);
         if (row_last)   DisposeObject(row_last);
         if (row_next)   DisposeObject(row_next);
+    }
+    if (!settings_group) {
+        if (row_server)   DisposeObject(row_server);
+        if (row_interval) DisposeObject(row_interval);
     }
     if (pub_screen_locked && pub_screen) {
         UnlockPubScreen(NULL, pub_screen);
