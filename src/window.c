@@ -748,7 +748,7 @@ cleanup:
         if (row)        DisposeObject(row);
         if (city_label) DisposeObject(city_label);
     }
-        if (!button_row) {
+    if (!button_row) {
         if (btn_sync) DisposeObject(btn_sync);
         if (btn_save) DisposeObject(btn_save);
         if (btn_hide) DisposeObject(btn_hide);
