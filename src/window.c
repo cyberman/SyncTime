@@ -462,7 +462,6 @@ BOOL window_open(struct Screen *screen)
         return TRUE;   /* Already open */
 
     /* Lock the public screen for proper font settings */
-    /* Lock the public screen for proper font settings */
     pub_screen_locked = FALSE;
 
     if (screen) {
