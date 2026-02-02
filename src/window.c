@@ -448,7 +448,7 @@ BOOL window_open(struct Screen *screen)
     ULONG region_count, i;
     const TZEntry *tz;
     Object *status_group = NULL, *settings_group = NULL, *timezone_group = NULL, *button_row = NULL;
-    Object *row = NULL;
+    Object *city_row = NULL;
     Object *row_status = NULL, *row_last = NULL, *row_next = NULL;
     Object *row_server = NULL, *row_interval = NULL;
     Object *row_region = NULL;
@@ -604,14 +604,14 @@ BOOL window_open(struct Screen *screen)
     if (!city_label)
         goto cleanup;
 
-    row = NewObject(LAYOUT_GetClass(), NULL,
+    city_row = NewObject(LAYOUT_GetClass(), NULL,
         LAYOUT_Orientation, LAYOUT_ORIENT_HORIZ,
         LAYOUT_AddImage, (ULONG)city_label,
         CHILD_WeightedWidth, 0,
         LAYOUT_AddChild, (ULONG)gad_city,
         TAG_DONE);
 
-    if (!row)
+    if (!city_row)
         goto cleanup;
 
     row_region = create_label_row("Region:", gad_region);
@@ -626,7 +626,7 @@ BOOL window_open(struct Screen *screen)
         LAYOUT_SpaceOuter, TRUE,
         LAYOUT_AddChild, (ULONG)row_region,
         CHILD_WeightedHeight, 0,
-        LAYOUT_AddChild, (ULONG)row,
+        LAYOUT_AddChild, (ULONG)city_row,
         CHILD_MinHeight, 80,
         LAYOUT_AddChild, (ULONG)gad_tz_info,
         CHILD_WeightedHeight, 0,
@@ -744,7 +744,7 @@ cleanup:
     }
     if (!timezone_group) {
         if (row_region) DisposeObject(row_region);
-        if (row)        DisposeObject(row);
+        if (city_row)   DisposeObject(city_row);
         if (city_label) DisposeObject(city_label);
     }
     if (!button_row) {
